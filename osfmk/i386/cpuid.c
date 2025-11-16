@@ -2093,6 +2093,23 @@ cpuid_get_current_core_type(void)
             reg[eax] = 0x4;
             reg[ecx] = 0x3;
             cpuid(reg);
+
+			/*
+			 * This is such a bold assumption.
+			 *
+			 * Arrow Lake:
+			 * Desktop silicon has no LP E-cores in the SoC tile
+			 * Mobile silicon, however, does (excluding HX silicon).
+			 *
+			 * Meteor Lake:
+			 * All silicon has LP E-cores
+			 *
+			 * Lunar Lake:
+			 * Zero E-cores. Lion Cove P-cores + Gracemont LP E-cores.
+			 *
+			 * Rolling with this for now since Intel didn't bother to give anyone
+			 * a sane method of enumerating core hierarchy via the CPUID.
+			 */
             if (reg[eax] == 0) {
                 type = X86_CORE_TYPE_EFFICIENCY_LP;
             } else {
