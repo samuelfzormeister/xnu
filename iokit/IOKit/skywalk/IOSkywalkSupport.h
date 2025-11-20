@@ -72,14 +72,10 @@ typedef uint32_t        IOSKCount;
 typedef uint32_t        IOSKOffset;
 
 typedef struct {
-	boolean_t user_writable;        /* writable by user task */
-	boolean_t kernel_writable;      /* writable by kernel task */
-	boolean_t iodir_in;             /* direction: device-to-host */
-	boolean_t iodir_out;            /* direction: host-to-device */
+	boolean_t writable;             /* writable */
 	boolean_t purgeable;            /* purgeable (not wired) */
 	boolean_t inhibitCache;         /* cache-inhibit */
 	boolean_t physcontig;           /* physically contiguous */
-	boolean_t puredata;             /* data only, no pointers */
 } IOSKMemoryBufferSpec;
 
 typedef struct {

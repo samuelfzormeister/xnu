@@ -51,6 +51,7 @@ typedef enum {
 	SKSEG_STATE_DETACHED,           /* not backed by a IOBMD */
 	SKSEG_STATE_MAPPED,             /* mapped (IOBMD non-volatile) */
 	SKSEG_STATE_MAPPED_WIRED,       /* mapped (IOBMD non-volatile+wired) */
+	SKSEG_STATE_MAPPED_PERSISTENT,  /* mapped (IOBMD peristent???)*/
 } sksegment_state_t;
 
 struct skmem_region;
