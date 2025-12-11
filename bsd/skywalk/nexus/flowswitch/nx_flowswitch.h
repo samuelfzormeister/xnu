@@ -143,7 +143,7 @@ struct nexus_vp_adapter {
 struct nexus_wrap_adapter {
 	struct nexus_vp_adapter wna_up;
 
-	STAILQ_ENTRY(struct nexus_wrap_adapter) wna_link;
+	STAILQ_ENTRY(nexus_wrap_adapter) wna_link;
 
 	/* Hardware Nexus Adapter? */
 	struct nexus_adapter   *wna_hwna;
