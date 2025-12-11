@@ -415,7 +415,7 @@ cuckoo_hashtable_create(struct cuckoo_hashtable_params *p)
 	ASSERT(p->cht_capacity < UINT32_MAX);
 	n = (uint32_t)p->cht_capacity;
 	/*
-	 * SAMUEL ZORMEIESTER:
+	 * SAMUEL ZORMEISTER:
 	 * Is there an equivalent to Z_NOFAIL on 19.x?
 	 */
 	h = sk_alloc_type(struct cuckoo_hashtable, M_WAITOK, cuckoo_tag);

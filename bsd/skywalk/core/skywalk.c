@@ -91,8 +91,6 @@ uint64_t sk_features =
 #endif
     0;
 
-uint32_t sk_opp_defunct = 0;    /* opportunistic defunct */
-
 /* checksum offload is generic to any nexus (not specific to flowswitch) */
 uint32_t sk_cksum_tx = 1;       /* advertise outbound offload */
 uint32_t sk_cksum_rx = 1;       /* perform inbound checksum offload */
