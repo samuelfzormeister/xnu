@@ -561,7 +561,6 @@ bsd/skywalk/channel/kern_channel_event.c	optional skywalk
 bsd/skywalk/channel/channel_syscalls.c		optional skywalk
 bsd/skywalk/lib/cuckoo_hashtable.c		optional skywalk
 bsd/skywalk/lib/cuckoo_hashtable_test.c		optional skywalk
-bsd/skywalk/lib/net_filter_event.c		optional skywalk
 bsd/skywalk/mem/skmem.c				optional skywalk
 bsd/skywalk/mem/skmem_arena.c			optional skywalk
 bsd/skywalk/mem/skmem_cache.c			optional skywalk
