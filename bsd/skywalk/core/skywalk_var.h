@@ -350,6 +350,113 @@ extern uint32_t sk_rx_sync_packets;
 extern uint32_t sk_channel_buflet_alloc;
 extern uint32_t sk_min_pool_size;
 
+struct sk_protect;
+typedef const struct sk_protect *sk_protect_t;
+
+__attribute__((always_inline))
+static inline boolean_t
+sk_is_sync_protected(void)
+{
+	return net_thread_is_marked(NET_THREAD_CHANNEL_SYNC) != 0;
+}
+
+__attribute__((always_inline))
+static inline sk_protect_t
+sk_sync_protect(void)
+{
+	return (sk_protect_t)(const void *)
+	       net_thread_marks_push(NET_THREAD_CHANNEL_SYNC);
+}
+
+
+__attribute__((always_inline))
+static inline boolean_t
+sk_is_rx_notify_protected(void)
+{
+	return net_thread_is_marked(NET_THREAD_RX_NOTIFY) != 0;
+}
+
+__attribute__((always_inline))
+static inline sk_protect_t
+sk_rx_notify_protect(void)
+{
+	return (sk_protect_t)(const void *)
+	       net_thread_marks_push(NET_THREAD_RX_NOTIFY);
+}
+
+__attribute__((always_inline))
+static inline sk_protect_t
+sk_tx_notify_protect(void)
+{
+	return (sk_protect_t)(const void *)
+	       net_thread_marks_push(NET_THREAD_TX_NOTIFY);
+}
+
+__attribute__((always_inline))
+static inline boolean_t
+sk_is_tx_notify_protected(void)
+{
+	return net_thread_is_marked(NET_THREAD_TX_NOTIFY) != 0;
+}
+
+__attribute__((always_inline))
+static inline boolean_t
+sk_is_cache_update_protected(void)
+{
+	return net_thread_is_marked(NET_THREAD_CACHE_UPDATE) != 0;
+}
+
+__attribute__((always_inline))
+static inline sk_protect_t
+sk_cache_update_protect(void)
+{
+	return (sk_protect_t)(const void *)
+	       net_thread_marks_push(NET_THREAD_CACHE_UPDATE);
+}
+
+__attribute__((always_inline))
+static inline boolean_t
+sk_is_region_update_protected(void)
+{
+	return net_thread_is_marked(NET_THREAD_REGION_UPDATE) != 0;
+}
+
+__attribute__((always_inline))
+static inline sk_protect_t
+sk_region_update_protect(void)
+{
+	return (sk_protect_t)(const void *)
+	       net_thread_marks_push(NET_THREAD_REGION_UPDATE);
+}
+
+__attribute__((always_inline))
+static inline boolean_t
+sk_is_async_transmit_protected(void)
+{
+	return net_thread_is_marked(NET_THREAD_AYSYNC_TX) != 0;
+}
+
+__attribute__((always_inline))
+static inline sk_protect_t
+sk_async_transmit_protect(void)
+{
+	return (sk_protect_t)(const void *)
+	       net_thread_marks_push(NET_THREAD_AYSYNC_TX);
+}
+
+#define sk_sync_unprotect sk_unprotect
+#define sk_cache_update_unprotect sk_unprotect
+#define sk_region_update_unprotect sk_unprotect
+#define sk_tx_notify_unprotect sk_unprotect
+#define sk_async_transmit_unprotect sk_unprotect
+
+__attribute__((always_inline))
+static inline void
+sk_unprotect(sk_protect_t protect)
+{
+	net_thread_marks_pop((net_thread_marks_t)(const void*)protect);
+}
+
 /*
  * For sysctls that _MALLOC a buffer to fill then copyout at completion,
  * set an upper bound on the size of the buffer we'll allocate.

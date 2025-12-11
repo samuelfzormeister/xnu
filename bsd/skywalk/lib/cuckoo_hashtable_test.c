@@ -147,7 +147,7 @@ void
 cht_test_init(void)
 {
 	if (OSCompareAndSwap(0, 1, &cht_inited)) {
-		lck_mtx_init(&cht_lock, &sk_lock_group, &sk_lock_attr);
+		lck_mtx_init(&cht_lock, sk_lock_group, sk_lock_attr);
 
 		ASSERT(cuckoo_test_tag == NULL);
 		cuckoo_test_tag = kern_allocation_name_allocate(CUCKOO_TEST_TAG, 0);
@@ -158,7 +158,7 @@ cht_test_init(void)
 void
 cht_test_fini(void)
 {
-	lck_mtx_destroy(&cht_lock, &sk_lock_group);
+	lck_mtx_destroy(&cht_lock, sk_lock_group);
 }
 
 static void
@@ -166,7 +166,7 @@ cht_obj_init()
 {
 	// init testing objects
 	cht_objs = sk_alloc_type_array(struct cht_obj, CHT_OBJ_MAX,
-	    Z_WAITOK, cuckoo_test_tag);
+	    M_WAITOK, cuckoo_test_tag);
 	VERIFY(cht_objs != NULL);
 
 	for (uint32_t i = 0; i < CHT_OBJ_MAX; i++) {
@@ -524,7 +524,7 @@ cht_concurrent_duo(void *v, wait_result_t w)
 	cht_concurrent_ops_begin();
 
 	uint32_t *rands;
-	rands = sk_alloc_data(sizeof(uint32_t) * DUO_ITERATIONS, Z_WAITOK, cuckoo_test_tag);
+	rands = sk_alloc_data(sizeof(uint32_t) * DUO_ITERATIONS, M_WAITOK, cuckoo_test_tag);
 	VERIFY(rands != NULL);
 	read_random(rands, sizeof(uint32_t) * DUO_ITERATIONS);
 
@@ -562,7 +562,7 @@ cht_concurrent_duo(void *v, wait_result_t w)
 		}
 	}
 
-	sk_free_data(rands, sizeof(uint32_t) * DUO_ITERATIONS);
+	sk_free_data(rands);
 	cht_concurrent_ops_done();
 }
 
@@ -620,7 +620,7 @@ cht_concurrent_tests(
 	if (chth_confs == NULL) {
 		chth_nthreads = nthreads;
 		chth_confs = sk_alloc_type_array(struct cht_thread_conf, nthreads,
-		    Z_WAITOK | Z_NOFAIL, cuckoo_test_tag);
+		    M_WAITOK, cuckoo_test_tag);
 	}
 
 	for (uint32_t i = 0; i < nthreads; i++) {

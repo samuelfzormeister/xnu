@@ -414,10 +414,14 @@ cuckoo_hashtable_create(struct cuckoo_hashtable_params *p)
 
 	ASSERT(p->cht_capacity < UINT32_MAX);
 	n = (uint32_t)p->cht_capacity;
-	h = sk_alloc_type(struct cuckoo_hashtable, Z_WAITOK | Z_NOFAIL, cuckoo_tag);
+	/*
+	 * SAMUEL ZORMEIESTER:
+	 * Is there an equivalent to Z_NOFAIL on 19.x?
+	 */
+	h = sk_alloc_type(struct cuckoo_hashtable, M_WAITOK, cuckoo_tag);
 
 	n_buckets = __align32pow2(n / _CHT_BUCKET_SLOTS);
-	buckets = sk_alloc_type_array(struct _bucket, n_buckets, Z_WAITOK, cuckoo_tag);
+	buckets = sk_alloc_type_array(struct _bucket, n_buckets, M_WAITOK, cuckoo_tag);
 	if (buckets == NULL) {
 		sk_free_type(struct cuckoo_hashtable, h);
 		return NULL;
@@ -461,7 +465,7 @@ cuckoo_hashtable_free(struct cuckoo_hashtable *h)
 
 	if (h->_buckets != NULL) {
 		for (i = 0; i < h->_n_buckets; i++) {
-			lck_mtx_destroy(&h->_buckets[i]._lock, &cht_lock_group);
+			lck_mtx_destroy(&h->_buckets[i]._lock, cht_lock_group);
 		}
 		sk_free_type_array(struct _bucket, h->_n_buckets, h->_buckets);
 	}
@@ -912,7 +916,7 @@ cuckoo_resize(struct cuckoo_hashtable *h, enum cuckoo_resize_ops option)
 	}
 
 	for (uint32_t i = 0; i < h->_n_buckets; i++) {
-		lck_mtx_destroy(&h->_buckets[i]._lock, &cht_lock_group);
+		lck_mtx_destroy(&h->_buckets[i]._lock, cht_lock_group);
 	}
 	h->_n_buckets = tmp_h->_n_buckets;
 	h->_capacity = h->_n_buckets * _CHT_BUCKET_SLOTS;
@@ -920,8 +924,8 @@ cuckoo_resize(struct cuckoo_hashtable *h, enum cuckoo_resize_ops option)
 	sk_free_type_array(struct _bucket, curr_buckets, h->_buckets);
 
 	h->_buckets = tmp_h->_buckets;
-	lck_rw_destroy(&tmp_h->_resize_lock, &cht_lock_group);
-	lck_mtx_destroy(&tmp_h->_lock, &cht_lock_group);
+	lck_rw_destroy(&tmp_h->_resize_lock, cht_lock_group);
+	lck_mtx_destroy(&tmp_h->_lock, cht_lock_group);
 	sk_free_type(struct cuckoo_hashtable, tmp_h);
 
 done:
