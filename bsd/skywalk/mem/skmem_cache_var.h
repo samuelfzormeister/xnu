@@ -100,7 +100,7 @@ struct skmem_magtype {
 	int                     mt_align;       /* magazine alignment */
 	size_t                  mt_minbuf;      /* all smaller bufs qualify */
 	size_t                  mt_maxbuf;      /* no larger bufs qualify */
-	mcache_t                mt_cache;       /* magazine cache */
+	mcache_t                *mt_cache;       /* magazine cache */
 	char                    mt_cname[64];   /* magazine cache name */
 };
 
@@ -284,12 +284,9 @@ struct skmem_cache {
 #define SKM_MODE_NOREDIRECT     0x00000004      /* unaffected by defunct */
 #define SKM_MODE_BATCH          0x00000008      /* supports batch alloc/free */
 #define SKM_MODE_DYNAMIC        0x00000010      /* enable magazine resizing */
-#define SKM_MODE_CLEARONFREE    0x00000020      /* zero-out upon slab free */
-#define SKM_MODE_PSEUDO         0x00000040      /* external backing store */
 
 #define SKM_MODE_BITS \
-	"\020\01NOMAGAZINES\02AUDIT\03NOREDIRECT\04BATCH\05DYNAMIC"     \
-	"\06CLEARONFREE\07PSEUDO"
+	"\020\01NOMAGAZINES\02AUDIT\03NOREDIRECT\04BATCH\05DYNAMIC"
 
 /*
  * Valid flags for sk{mem,region}_alloc().  SKMEM_FAILOK is valid only if
@@ -307,11 +304,9 @@ struct skmem_cache {
 #define SKMEM_CR_NOMAGAZINES    0x1     /* disable magazines layer */
 #define SKMEM_CR_BATCH          0x2     /* support batch alloc/free */
 #define SKMEM_CR_DYNAMIC        0x4     /* enable magazine resizing */
-#define SKMEM_CR_CLEARONFREE    0x8     /* zero-out upon slab free */
 
 __BEGIN_DECLS
 
-extern void skmem_cache_pre_init(void);
 extern void skmem_cache_init(void);
 extern void skmem_cache_fini(void);
 extern struct skmem_cache *skmem_cache_create(const char *, size_t, size_t,
