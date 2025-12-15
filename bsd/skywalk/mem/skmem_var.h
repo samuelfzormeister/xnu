@@ -57,9 +57,9 @@
 
 #define SKMEM_DRV_BUF_SEG_MULTIPLIER    2
 
-#define SKMEM_ARENA_PREFIX      "ska"
-#define SKMEM_REGION_PREFIX     "skr"
-#define SKMEM_CACHE_PREFIX      "skc"
+#define SKMEM_ARENA_PREFIX      "skywalk.mem.arena"
+#define SKMEM_REGION_PREFIX     "skywalk.mem.region"
+#define SKMEM_CACHE_PREFIX      "skywalk.mem.cache"
 #define SKMEM_ZONE_PREFIX       "skywalk"
 
 extern lck_attr_t *skmem_lock_attr;

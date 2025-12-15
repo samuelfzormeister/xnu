@@ -127,33 +127,30 @@ static struct sksegment *sksegment_freelist_remove(struct skmem_region *,
 static struct sksegment *sksegment_freelist_grow(struct skmem_region *);
 static struct sksegment *sksegment_alloc_with_idx(struct skmem_region *,
     uint32_t);
-static void *skmem_region_alloc_common(struct skmem_region *,
-    struct sksegment *);
-static void *skmem_region_mirror_alloc(struct skmem_region *,
-    struct sksegment *, struct sksegment **);
 static void skmem_region_applyall(void (*)(struct skmem_region *));
 static void skmem_region_update(struct skmem_region *);
 static void skmem_region_update_func(thread_call_param_t, thread_call_param_t);
 static inline void skmem_region_retain_locked(struct skmem_region *);
 static inline boolean_t skmem_region_release_locked(struct skmem_region *);
-static int skmem_region_mib_get_sysctl SYSCTL_HANDLER_ARGS;
+#if SK_LOG
+const char *skmem_region_id2name(skmem_region_id_t);
+#endif /* SK_LOG */
 
-RB_PROTOTYPE_PREV(segtfreehead, sksegment, sg_node, sksegment_cmp);
-RB_GENERATE_PREV(segtfreehead, sksegment, sg_node, sksegment_cmp);
-
+/*
+ * No region statistics on Darwin 19.6.
+ */
+#if 0
 SYSCTL_PROC(_kern_skywalk_stats, OID_AUTO, region,
     CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
     0, 0, skmem_region_mib_get_sysctl, "S,sk_stats_region",
     "Skywalk region statistics");
-
-static LCK_ATTR_DECLARE(skmem_region_lock_attr, 0, 0);
-static LCK_GRP_DECLARE(skmem_region_lock_grp, "skmem_region");
-static LCK_MTX_DECLARE_ATTR(skmem_region_lock, &skmem_region_lock_grp,
-    &skmem_region_lock_attr);
+#endif
 
 static lck_grp_attr_t *skmem_region_lock_grp_attr;
 static lck_grp_t *skmem_region_lock_grp;
 static lck_attr_t *skmem_region_lock_attr;
+
+static decl_lck_mtx_data(, skmem_region_lock);
 
 /* protected by skmem_region_lock */
 static TAILQ_HEAD(, skmem_region) skmem_region_head;
@@ -206,13 +203,14 @@ SYSCTL_UINT(_kern_skywalk_mem, OID_AUTO, region_update_interval,
 	(&(_skr)->skr_hash_table[SKMEM_REGION_HASH_INDEX((uintptr_t)_addr, \
 	    (_skr)->skr_hash_shift, (_skr)->skr_hash_mask)])
 
-static ZONE_DECLARE(skr_zone, SKMEM_ZONE_PREFIX ".mem.skr",
-    sizeof(struct skmem_region), ZC_ZFREE_CLEARMEM);
+#define SKMEM_REGION_ZONE_ALLOC_SIZE sizeof(struct skmem_region)
+#define SKMEM_REGION_ZONE_SIZE sizeof(struct skmem_region) * 256
 
+static uint32_t skr_size;
 static zone_t skr_zone;
 
 static unsigned int sg_size;                    /* size of zone element */
-static struct skmem_cache *skmem_sg_cache;      /* cache for sksegment */
+static mcache_t *skmem_sg_cache;      /* cache for sksegment */
 
 static uint32_t skmem_seg_size = SKMEM_SEG_SIZE;
 static uint32_t skmem_md_seg_size = SKMEM_MD_SEG_SIZE;
@@ -226,8 +224,8 @@ static kern_allocation_name_t skmem_tag_segment_bmap;
 #define SKMEM_TAG_SEGMENT_HASH  "com.apple.skywalk.segment.hash"
 static kern_allocation_name_t skmem_tag_segment_hash;
 
-#define SKMEM_TAG_REGION_MIB     "com.apple.skywalk.region.mib"
-static kern_allocation_name_t skmem_tag_region_mib;
+#define SKMEM_TAG_SEGMENT_LUT   "com.apple.skywalk.segment.lut"
+static kern_allocation_name_t skmem_tag_segment_lut;
 
 #define BMAPSZ  64
 
@@ -279,19 +277,12 @@ skmem_region_init(void)
 
 	_CASSERT(SKR_MODE_NOREDIRECT == SREG_MODE_NOREDIRECT);
 	_CASSERT(SKR_MODE_MMAPOK == SREG_MODE_MMAPOK);
-	_CASSERT(SKR_MODE_UREADONLY == SREG_MODE_UREADONLY);
-	_CASSERT(SKR_MODE_KREADONLY == SREG_MODE_KREADONLY);
+	_CASSERT(SKR_MODE_READONLY == SREG_MODE_READONLY);
 	_CASSERT(SKR_MODE_PERSISTENT == SREG_MODE_PERSISTENT);
 	_CASSERT(SKR_MODE_MONOLITHIC == SREG_MODE_MONOLITHIC);
 	_CASSERT(SKR_MODE_NOMAGAZINES == SREG_MODE_NOMAGAZINES);
 	_CASSERT(SKR_MODE_NOCACHE == SREG_MODE_NOCACHE);
-	_CASSERT(SKR_MODE_IODIR_IN == SREG_MODE_IODIR_IN);
-	_CASSERT(SKR_MODE_IODIR_OUT == SREG_MODE_IODIR_OUT);
-	_CASSERT(SKR_MODE_GUARD == SREG_MODE_GUARD);
 	_CASSERT(SKR_MODE_SEGPHYSCONTIG == SREG_MODE_SEGPHYSCONTIG);
-	_CASSERT(SKR_MODE_SHAREOK == SREG_MODE_SHAREOK);
-	_CASSERT(SKR_MODE_PUREDATA == SREG_MODE_PUREDATA);
-	_CASSERT(SKR_MODE_PSEUDO == SREG_MODE_PSEUDO);
 	_CASSERT(SKR_MODE_SLAB == SREG_MODE_SLAB);
 	_CASSERT(SKR_MODE_MIRRORED == SREG_MODE_MIRRORED);
 
@@ -353,6 +344,14 @@ skmem_region_init(void)
 	    skmem_drv_buf_seg_size, skmem_drv_buf_seg_eff_size,
 	    skmem_usr_buf_seg_size);
 
+	skmem_region_lock_grp_attr = lck_grp_attr_alloc_init();
+	skmem_region_lock_grp = lck_grp_alloc_init("skmem_region", skmem_region_lock_grp_attr);
+	skmem_region_lock_attr = lck_attr_alloc_init();
+	lck_mtx_init(&skmem_region_lock, skmem_region_lock_grp, skmem_region_lock_attr);
+
+	skr_size = SKMEM_REGION_ZONE_ALLOC_SIZE;
+	skr_zone = zinit(sizeof(struct skmem_region), SKMEM_REGION_ZONE_SIZE, 0, SKMEM_ZONE_PREFIX ".mem.skr");
+
 	TAILQ_INIT(&skmem_region_head);
 
 	ASSERT(skmem_tag_segment_hash == NULL);
@@ -365,10 +364,10 @@ skmem_region_init(void)
 	    kern_allocation_name_allocate(SKMEM_TAG_SEGMENT_BMAP, 0);
 	ASSERT(skmem_tag_segment_bmap != NULL);
 
-	ASSERT(skmem_tag_region_mib == NULL);
-	skmem_tag_region_mib =
-	    kern_allocation_name_allocate(SKMEM_TAG_REGION_MIB, 0);
-	ASSERT(skmem_tag_region_mib != NULL);
+	ASSERT(skmem_tag_segment_lut == NULL);
+	skmem_tag_segment_lut =
+	    kern_allocation_name_allocate(SKMEM_TAG_SEGMENT_LUT, 0);
+	ASSERT(skmem_tag_segment_lut != NULL);
 
 	skmem_region_update_tc =
 	    thread_call_allocate_with_options(skmem_region_update_func,
@@ -380,8 +379,8 @@ skmem_region_init(void)
 	}
 
 	sg_size = sizeof(struct sksegment);
-	skmem_sg_cache = skmem_cache_create("sg", sg_size,
-	    sizeof(uint64_t), NULL, NULL, NULL, NULL, NULL, 0);
+	skmem_sg_cache = mcache_create("skywalk.mem.sg", sizeof(struct sksegment),
+	                                sizeof(uint64_t), 0, 0);
 
 	/* and start the periodic region update machinery */
 	skmem_dispatch(skmem_region_update_tc, NULL,
@@ -403,7 +402,7 @@ skmem_region_fini(void)
 		}
 
 		if (skmem_sg_cache != NULL) {
-			skmem_cache_destroy(skmem_sg_cache);
+			mcache_destroy(skmem_sg_cache);
 			skmem_sg_cache = NULL;
 		}
 
@@ -415,9 +414,9 @@ skmem_region_fini(void)
 			kern_allocation_name_release(skmem_tag_segment_bmap);
 			skmem_tag_segment_bmap = NULL;
 		}
-		if (skmem_tag_region_mib != NULL) {
-			kern_allocation_name_release(skmem_tag_region_mib);
-			skmem_tag_region_mib = NULL;
+		if (skmem_tag_segment_lut != NULL) {
+			kern_allocation_name_release(skmem_tag_segment_lut);
+			skmem_tag_segment_lut = NULL;
 		}
 
 		__skmem_region_inited = 0;
@@ -430,7 +429,7 @@ skmem_region_fini(void)
 void
 skmem_region_reap_caches(boolean_t purge)
 {
-	skmem_cache_reap_now(skmem_sg_cache, purge);
+    mcache_reap_now(skmem_sg_cache, purge);
 }
 
 /*
@@ -460,34 +459,6 @@ skmem_region_params_config(struct skmem_region_params *srp)
 	ASSERT(objsize != 0);
 	objcnt = srp->srp_r_obj_cnt;
 	ASSERT(objcnt != 0);
-
-	if (srp->srp_cflags & SKMEM_REGION_CR_PSEUDO) {
-		size_t align = srp->srp_align;
-
-		VERIFY(align != 0 && (align % SKMEM_CACHE_ALIGN) == 0);
-		VERIFY(powerof2(align));
-		objsize = MAX(objsize, sizeof(uint64_t));
-#if KASAN
-		/*
-		 * When KASAN is enabled, the zone allocator adjusts the
-		 * element size to include the redzone regions, in which
-		 * case we assume that the elements won't start on the
-		 * alignment boundary and thus need to do some fix-ups.
-		 * These include increasing the effective object size
-		 * which adds at least 16 bytes to the original size.
-		 */
-		objsize += sizeof(uint64_t) + align;
-#endif /* KASAN */
-		objsize = P2ROUNDUP(objsize, align);
-
-		segsize = objsize;
-		srp->srp_r_seg_size = (uint32_t)segsize;
-		segcnt = objcnt;
-		goto done;
-	} else {
-		/* objects are always aligned at CPU cache line size */
-		srp->srp_align = cache_line_size;
-	}
 
 	/*
 	 * Start with default segment size for the region, and compute the
@@ -637,7 +608,6 @@ skmem_region_params_config(struct skmem_region_params *srp)
 	/* recompute object count to avoid wastage */
 	objcnt = (segsize * segcnt) / objsize;
 	ASSERT(objcnt != 0);
-done:
 	srp->srp_c_obj_size = (uint32_t)objsize;
 	srp->srp_c_obj_cnt = (uint32_t)objcnt;
 	srp->srp_c_seg_size = (uint32_t)segsize;
@@ -667,49 +637,38 @@ struct skmem_region *
 skmem_region_create(const char *name, struct skmem_region_params *srp,
     sksegment_ctor_fn_t ctor, sksegment_dtor_fn_t dtor, void *private)
 {
-	boolean_t pseudo = (srp->srp_cflags & SKMEM_REGION_CR_PSEUDO);
 	uint32_t cflags = srp->srp_cflags;
 	struct skmem_region *skr;
 	uint32_t i;
 
 	ASSERT(srp->srp_id < SKMEM_REGIONS);
 	ASSERT(srp->srp_c_seg_size != 0 &&
-	    (pseudo || (srp->srp_c_seg_size % SKMEM_PAGE_SIZE) == 0));
+	    ((srp->srp_c_seg_size % SKMEM_PAGE_SIZE) == 0));
 	ASSERT(srp->srp_seg_cnt != 0);
 	ASSERT(srp->srp_c_obj_cnt == 1 ||
 	    (srp->srp_c_seg_size % srp->srp_c_obj_size) == 0);
 	ASSERT(srp->srp_c_obj_size <= srp->srp_c_seg_size);
 
 	skr = zalloc(skr_zone);
+	bzero(skr, skr_size);
 	skr->skr_params.srp_r_seg_size = srp->srp_r_seg_size;
 	skr->skr_seg_size = srp->srp_c_seg_size;
 	skr->skr_size = (srp->srp_c_seg_size * srp->srp_seg_cnt);
 	skr->skr_seg_objs = (srp->srp_c_seg_size / srp->srp_c_obj_size);
 
-	if (!pseudo) {
-		skr->skr_seg_max_cnt = srp->srp_seg_cnt;
+	skr->skr_seg_max_cnt = srp->srp_seg_cnt;
 
-		/* set alignment to CPU cache line size */
-		skr->skr_params.srp_align = skmem_cpu_cache_line_size();
+	/* allocate the allocated-address hash chain */
+	skr->skr_hash_initial = SKMEM_REGION_HASH_INITIAL;
+	skr->skr_hash_limit = SKMEM_REGION_HASH_LIMIT;
+	skr->skr_hash_table = sk_alloc_type_array(struct sksegment_bkt,
+	    skr->skr_hash_initial, M_WAITOK,
+	    skmem_tag_segment_hash);
+	skr->skr_hash_mask = (skr->skr_hash_initial - 1);
+	skr->skr_hash_shift = flsll(srp->srp_c_seg_size) - 1;
 
-		/* allocate the allocated-address hash chain */
-		skr->skr_hash_initial = SKMEM_REGION_HASH_INITIAL;
-		skr->skr_hash_limit = SKMEM_REGION_HASH_LIMIT;
-		skr->skr_hash_table = sk_alloc_type_array(struct sksegment_bkt,
-		    skr->skr_hash_initial, M_WAITOK,
-		    skmem_tag_segment_hash);
-		skr->skr_hash_mask = (skr->skr_hash_initial - 1);
-		skr->skr_hash_shift = flsll(srp->srp_c_seg_size) - 1;
-
-		for (i = 0; i < (skr->skr_hash_mask + 1); i++) {
-			TAILQ_INIT(&skr->skr_hash_table[i].sgb_head);
-		}
-	} else {
-		/* this upper bound doesn't apply */
-		skr->skr_seg_max_cnt = 0;
-
-		/* pick up value set by skmem_regions_params_config() */
-		skr->skr_params.srp_align = srp->srp_align;
+	for (i = 0; i < (skr->skr_hash_mask + 1); i++) {
+		TAILQ_INIT(&skr->skr_hash_table[i].sgb_head);
 	}
 
 	skr->skr_r_obj_size = srp->srp_r_obj_size;
@@ -733,17 +692,10 @@ skmem_region_create(const char *name, struct skmem_region_params *srp,
 	skr->skr_id = srp->srp_id;
 	uuid_generate_random(skr->skr_uuid);
 	(void) snprintf(skr->skr_name, sizeof(skr->skr_name),
-	    "%s.%s.%s", SKMEM_REGION_PREFIX, srp->srp_name, name);
+	    "skywalk.region.%s.%s", srp->srp_name, name);
 
 	SK_DF(SK_VERB_MEM_REGION, "\"%s\": skr 0x%llx ",
 	    skr->skr_name, SK_KVA(skr));
-
-	/* sanity check */
-	ASSERT(!(cflags & SKMEM_REGION_CR_GUARD) ||
-	    !(cflags & (SKMEM_REGION_CR_KREADONLY | SKMEM_REGION_CR_UREADONLY |
-	    SKMEM_REGION_CR_PERSISTENT | SKMEM_REGION_CR_SHAREOK |
-	    SKMEM_REGION_CR_IODIR_IN | SKMEM_REGION_CR_IODIR_OUT |
-	    SKMEM_REGION_CR_PUREDATA)));
 
 	skr->skr_cflags = cflags;
 	if (cflags & SKMEM_REGION_CR_NOREDIRECT) {
@@ -753,11 +705,8 @@ skmem_region_create(const char *name, struct skmem_region_params *srp,
 		skr->skr_mode |= SKR_MODE_MMAPOK;
 	}
 	if ((cflags & SKMEM_REGION_CR_MMAPOK) &&
-	    (cflags & SKMEM_REGION_CR_UREADONLY)) {
-		skr->skr_mode |= SKR_MODE_UREADONLY;
-	}
-	if (cflags & SKMEM_REGION_CR_KREADONLY) {
-		skr->skr_mode |= SKR_MODE_KREADONLY;
+	    (cflags & SKMEM_REGION_CR_READONLY)) {
+		skr->skr_mode |= SKR_MODE_READONLY;
 	}
 	if (cflags & SKMEM_REGION_CR_PERSISTENT) {
 		skr->skr_mode |= SKR_MODE_PERSISTENT;
@@ -774,63 +723,28 @@ skmem_region_create(const char *name, struct skmem_region_params *srp,
 	if (cflags & SKMEM_REGION_CR_SEGPHYSCONTIG) {
 		skr->skr_mode |= SKR_MODE_SEGPHYSCONTIG;
 	}
-	if (cflags & SKMEM_REGION_CR_SHAREOK) {
-		skr->skr_mode |= SKR_MODE_SHAREOK;
-	}
-	if (cflags & SKMEM_REGION_CR_IODIR_IN) {
-		skr->skr_mode |= SKR_MODE_IODIR_IN;
-	}
-	if (cflags & SKMEM_REGION_CR_IODIR_OUT) {
-		skr->skr_mode |= SKR_MODE_IODIR_OUT;
-	}
-	if (cflags & SKMEM_REGION_CR_GUARD) {
-		skr->skr_mode |= SKR_MODE_GUARD;
-	}
-	if (cflags & SKMEM_REGION_CR_PUREDATA) {
-		skr->skr_mode |= SKR_MODE_PUREDATA;
-	}
-	if (cflags & SKMEM_REGION_CR_PSEUDO) {
-		skr->skr_mode |= SKR_MODE_PSEUDO;
-	}
-
-#if XNU_TARGET_OS_OSX
-	/*
-	 * Mark all regions as persistent except for the guard and Intrinsic
-	 * regions.
-	 * This is to ensure that kernel threads won't be faulting-in while
-	 * accessing these memory regions. We have observed various kinds of
-	 * kernel panics due to kernel threads faulting on non-wired memory
-	 * access when the VM subsystem is not in a state to swap-in the page.
-	 */
-	if (!((skr->skr_mode & SKR_MODE_PSEUDO) ||
-	    (skr->skr_mode & SKR_MODE_GUARD))) {
-		skr->skr_mode |= SKR_MODE_PERSISTENT;
-	}
-#endif /* XNU_TARGET_OS_OSX */
 
 	/* SKR_MODE_UREADONLY only takes effect for user task mapping */
-	skr->skr_bufspec.user_writable = !(skr->skr_mode & SKR_MODE_UREADONLY);
-	skr->skr_bufspec.kernel_writable = !(skr->skr_mode & SKR_MODE_KREADONLY);
+	skr->skr_bufspec.writable = !(skr->skr_mode & SKR_MODE_READONLY);
 	skr->skr_bufspec.purgeable = TRUE;
 	skr->skr_bufspec.inhibitCache = !!(skr->skr_mode & SKR_MODE_NOCACHE);
 	skr->skr_bufspec.physcontig = (skr->skr_mode & SKR_MODE_SEGPHYSCONTIG);
-	skr->skr_bufspec.iodir_in = !!(skr->skr_mode & SKR_MODE_IODIR_IN);
-	skr->skr_bufspec.iodir_out = !!(skr->skr_mode & SKR_MODE_IODIR_OUT);
-	skr->skr_bufspec.puredata = !!(skr->skr_mode & SKR_MODE_PUREDATA);
 	skr->skr_regspec.noRedirect = !!(skr->skr_mode & SKR_MODE_NOREDIRECT);
 
-	/* allocate segment bitmaps */
-	if (!(skr->skr_mode & SKR_MODE_PSEUDO)) {
-		ASSERT(skr->skr_seg_max_cnt != 0);
-		skr->skr_seg_bmap_len = BITMAP_LEN(skr->skr_seg_max_cnt);
-		skr->skr_seg_bmap = sk_alloc_data(BITMAP_SIZE(skr->skr_seg_max_cnt),
-		    M_NOWAIT, skmem_tag_segment_bmap);
-		ASSERT(BITMAP_SIZE(skr->skr_seg_max_cnt) ==
-		    (skr->skr_seg_bmap_len * sizeof(*skr->skr_seg_bmap)));
-
-		/* mark all bitmaps as free (bit set) */
-		bitmap_full(skr->skr_seg_bmap, skr->skr_seg_max_cnt);
+	if (skr->skr_mode & SKR_MODE_PERSISTENT) {
+	    skr->skr_seg_lut = sk_alloc((skr->skr_seg_max_cnt * sizeof(struct sksegment *)), M_WAITOK, skmem_tag_segment_lut);
 	}
+
+	/* allocate segment bitmaps */
+	ASSERT(skr->skr_seg_max_cnt != 0);
+	skr->skr_seg_bmap_len = BITMAP_LEN(skr->skr_seg_max_cnt);
+	skr->skr_seg_bmap = sk_alloc_data(BITMAP_SIZE(skr->skr_seg_max_cnt),
+	    M_NOWAIT, skmem_tag_segment_bmap);
+	ASSERT(BITMAP_SIZE(skr->skr_seg_max_cnt) ==
+	   (skr->skr_seg_bmap_len * sizeof(*skr->skr_seg_bmap)));
+
+	/* mark all bitmaps as free (bit set) */
+	bitmap_full(skr->skr_seg_bmap, skr->skr_seg_max_cnt);
 
 	/*
 	 * Populate the freelist by allocating all segments for the
@@ -839,24 +753,17 @@ skmem_region_create(const char *name, struct skmem_region_params *srp,
 	 * turn unmap the segment's memory object.
 	 */
 	SKR_LOCK(skr);
-	if (skr->skr_mode & SKR_MODE_PSEUDO) {
-		char zone_name[64];
-		(void) snprintf(zone_name, sizeof(zone_name), "%s.reg.%s",
-		    SKMEM_ZONE_PREFIX, name);
-		skr->skr_zreg = zinit(skr->skr_c_obj_size,
-		                    (skr->skr_c_obj_size * skr->skr_c_obj_cnt), 0, zone_name);
-	} else {
 		/* create a backing IOSKRegion object */
-		if ((skr->skr_reg = IOSKRegionCreate(&skr->skr_regspec,
-		    (IOSKSize)skr->skr_seg_size,
-		    (IOSKCount)skr->skr_seg_max_cnt)) == NULL) {
-			SK_ERR("\%s\": [%u * %u] cflags 0x%b skr_reg failed",
-			    skr->skr_name, (uint32_t)skr->skr_seg_size,
-			    (uint32_t)skr->skr_seg_max_cnt, skr->skr_cflags,
-			    SKMEM_REGION_CR_BITS);
-			goto failed;
-		}
+	if ((skr->skr_reg = IOSKRegionCreate(&skr->skr_regspec,
+		 (IOSKSize)skr->skr_seg_size,
+		 (IOSKCount)skr->skr_seg_max_cnt)) == NULL) {
+		SK_ERR("\%s\": [%u * %u] cflags 0x%b skr_reg failed",
+			 skr->skr_name, (uint32_t)skr->skr_seg_size,
+			 (uint32_t)skr->skr_seg_max_cnt, skr->skr_cflags,
+			 SKMEM_REGION_CR_BITS);
+		goto failed;
 	}
+
 
 	ASSERT(skr->skr_seg_objs != 0);
 
@@ -902,7 +809,7 @@ skmem_region_destroy(struct skmem_region *skr)
 	 */
 	ASSERT(skr->skr_refcnt == 0);
 	if (skr->skr_seginuse != 0) {
-		panic("%s: '%s' (%p) not empty (%u unfreed)",
+		panic("%s: '%s' (%p) not empty (%llu unfreed)",
 		    __func__, skr->skr_name, (void *)skr, skr->skr_seginuse);
 		/* NOTREACHED */
 		__builtin_unreachable();
@@ -922,23 +829,14 @@ skmem_region_destroy(struct skmem_region *skr)
 	 */
 	skmem_region_depopulate(skr);
 	ASSERT(TAILQ_EMPTY(&skr->skr_seg_free));
-	ASSERT(RB_EMPTY(&skr->skr_seg_tfree));
 	ASSERT(skr->skr_seg_free_cnt == 0);
 
 	if (skr->skr_reg != NULL) {
-		ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 		IOSKRegionDestroy(skr->skr_reg);
 		skr->skr_reg = NULL;
 	}
 
-	if (skr->skr_zreg != NULL) {
-		ASSERT(skr->skr_mode & SKR_MODE_PSEUDO);
-		zdestroy(skr->skr_zreg);
-		skr->skr_zreg = NULL;
-	}
-
 	if (skr->skr_seg_bmap != NULL) {
-		ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 #if (DEBUG || DEVELOPMENT)
 		ASSERT(skr->skr_seg_bmap_len != 0);
 		/* must have been set to vacant (bit set) by now */
@@ -952,7 +850,6 @@ skmem_region_destroy(struct skmem_region *skr)
 	ASSERT(skr->skr_seg_bmap_len == 0);
 
 	if (skr->skr_hash_table != NULL) {
-		ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 #if (DEBUG || DEVELOPMENT)
 		for (uint32_t i = 0; i < (skr->skr_hash_mask + 1); i++) {
 			ASSERT(TAILQ_EMPTY(&skr->skr_hash_table[i].sgb_head));
@@ -964,7 +861,6 @@ skmem_region_destroy(struct skmem_region *skr)
 		skr->skr_hash_table = NULL;
 	}
 	if ((mskr = skr->skr_mirror) != NULL) {
-		ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 		skr->skr_mirror = NULL;
 		mskr->skr_mode &= ~SKR_MODE_MIRRORED;
 	}
@@ -974,7 +870,7 @@ skmem_region_destroy(struct skmem_region *skr)
 		skmem_region_release(mskr);
 	}
 
-	lck_mtx_destroy(&skr->skr_lock, &skmem_region_lock_grp);
+	lck_mtx_destroy(&skr->skr_lock, skmem_region_lock_grp);
 
 	zfree(skr_zone, skr);
 }
@@ -1027,35 +923,6 @@ skmem_region_slab_config(struct skmem_region *skr, struct skmem_cache *skm)
 }
 
 /*
- * Common routines for skmem_region_{alloc,mirror_alloc}.
- */
-static void *
-skmem_region_alloc_common(struct skmem_region *skr, struct sksegment *sg)
-{
-	struct sksegment_bkt *sgb;
-	void *addr;
-
-	SKR_LOCK_ASSERT_HELD(skr);
-
-	ASSERT(sg->sg_md != NULL);
-	ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
-	addr = (void *)sg->sg_start;
-	sgb = SKMEM_REGION_HASH(skr, addr);
-	ASSERT(sg->sg_link.tqe_next == NULL);
-	ASSERT(sg->sg_link.tqe_prev == NULL);
-	TAILQ_INSERT_HEAD(&sgb->sgb_head, sg, sg_link);
-
-	skr->skr_seginuse++;
-	skr->skr_meminuse += skr->skr_seg_size;
-	if (sg->sg_state == SKSEG_STATE_MAPPED_WIRED) {
-		skr->skr_w_meminuse += skr->skr_seg_size;
-	}
-	skr->skr_alloc++;
-
-	return addr;
-}
-
-/*
  * Allocate a segment from the region.
  */
 void *
@@ -1066,8 +933,6 @@ skmem_region_alloc(struct skmem_region *skr, void **maddr,
 	struct sksegment *sg1 = NULL;
 	void *addr = NULL, *addr1 = NULL;
 	uint32_t retries = 0;
-
-	VERIFY(!(skr->skr_mode & SKR_MODE_GUARD));
 
 	if (retsg != NULL) {
 		*retsg = NULL;
@@ -1136,6 +1001,7 @@ retry:
 		 */
 		if (sksegment_freelist_remove(skr, sg, skmflag,
 		    FALSE) == NULL) {
+			ASSERT(!(skr->skr_mode & SKR_MODE_PERSISTENT));
 			ASSERT(sg->sg_state == SKSEG_STATE_DETACHED);
 			ASSERT(sg->sg_md == NULL);
 			ASSERT(sg->sg_start == 0 && sg->sg_end == 0);
@@ -1191,8 +1057,25 @@ retry:
 		}
 
 		if (sg != NULL) {
+		    struct sksegment_bkt *sgb;
+
 			/* insert to allocated-address hash chain */
-			addr = skmem_region_alloc_common(skr, sg);
+			SKR_LOCK_ASSERT_HELD(skr);
+
+			ASSERT(sg->sg_md != NULL);
+			ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
+			addr = (void *)sg->sg_start;
+			sgb = SKMEM_REGION_HASH(skr, addr);
+			ASSERT(sg->sg_link.tqe_next == NULL);
+			ASSERT(sg->sg_link.tqe_prev == NULL);
+			TAILQ_INSERT_HEAD(&sgb->sgb_head, sg, sg_link);
+
+			skr->skr_seginuse++;
+			skr->skr_meminuse += skr->skr_seg_size;
+			if (!(skr->skr_mode & SKR_MODE_PERSISTENT) || sg->sg_state == SKSEG_STATE_MAPPED_WIRED) {
+				skr->skr_w_meminuse += skr->skr_seg_size;
+			}
+			skr->skr_alloc++;
 		}
 	}
 
@@ -1242,7 +1125,7 @@ retry:
 		ASSERT(skr->skr_mirror != skr);
 		ASSERT(!(skr->skr_mode & SKR_MODE_MIRRORED));
 		ASSERT(skr->skr_mirror->skr_mode & SKR_MODE_MIRRORED);
-		addr1 = skmem_region_mirror_alloc(skr->skr_mirror, sg, &sg1);
+		addr1 = skmem_region_alloc(skr->skr_mirror, NULL, &sg1, NULL, (SKMEM_NOSLEEP | SKMEM_PANIC));
 		ASSERT(addr1 != NULL);
 		ASSERT(sg1 != NULL && sg1 != sg);
 		ASSERT(sg1->sg_index == sg->sg_index);
@@ -1269,74 +1152,6 @@ done:
 }
 
 /*
- * Allocate a segment from a mirror region at the same index.  While it
- * is somewhat a simplified variant of skmem_region_alloc, keeping it
- * separate allows us to avoid further convoluting that routine.
- */
-static void *
-skmem_region_mirror_alloc(struct skmem_region *skr, struct sksegment *sg0,
-    struct sksegment **retsg)
-{
-	struct sksegment sg_key = { .sg_index = sg0->sg_index };
-	struct sksegment *sg = NULL;
-	void *addr = NULL;
-
-	ASSERT(skr->skr_mode & SKR_MODE_MIRRORED);
-	ASSERT(skr->skr_mirror == NULL);
-	ASSERT(sg0->sg_type == SKSEG_TYPE_ALLOC);
-
-	if (retsg != NULL) {
-		*retsg = NULL;
-	}
-
-	SKR_LOCK(skr);
-
-	/*
-	 * See if we can find one in the freelist first.  Otherwise,
-	 * create a new segment of the same index and add that to the
-	 * freelist.  We would always get a segment since both regions
-	 * are synchronized when it comes to the indices of allocated
-	 * segments.
-	 */
-	sg = RB_FIND(segtfreehead, &skr->skr_seg_tfree, &sg_key);
-	if (sg == NULL) {
-		sg = sksegment_alloc_with_idx(skr, sg0->sg_index);
-		VERIFY(sg != NULL);
-	}
-	VERIFY(sg->sg_index == sg0->sg_index);
-
-	/*
-	 * We have a segment; remove it from the freelist and insert
-	 * it into the allocated-address hash chain.  This either
-	 * succeeds or panics (SKMEM_PANIC) when a memory descriptor
-	 * can't be allocated.
-	 *
-	 * TODO: consider retrying IOBMD allocation attempts if needed.
-	 */
-	sg = sksegment_freelist_remove(skr, sg, SKMEM_PANIC, FALSE);
-	VERIFY(sg != NULL);
-
-	/* insert to allocated-address hash chain */
-	addr = skmem_region_alloc_common(skr, sg);
-
-#if SK_LOG
-	SK_DF(SK_VERB_MEM_REGION, "skr 0x%llx sg 0x%llx",
-	    SK_KVA(skr), SK_KVA(sg));
-	SK_DF(SK_VERB_MEM_REGION, "  [%u] [0x%llx-0x%llx)",
-	    sg->sg_index, SK_KVA(sg->sg_start), SK_KVA(sg->sg_end));
-#endif /* SK_LOG */
-
-	SKR_UNLOCK(skr);
-
-	/* return segment metadata to caller if asked (reference not needed) */
-	if (retsg != NULL) {
-		*retsg = sg;
-	}
-
-	return addr;
-}
-
-/*
  * Free a segment to the region.
  */
 void
@@ -1344,9 +1159,6 @@ skmem_region_free(struct skmem_region *skr, void *addr, void *maddr)
 {
 	struct sksegment_bkt *sgb;
 	struct sksegment *sg, *tsg;
-
-	VERIFY(!(skr->skr_mode & SKR_MODE_GUARD));
-
 	/*
 	 * Search the hash chain to find a matching segment for the
 	 * given address.  If found, remove the segment from the
@@ -1366,7 +1178,7 @@ skmem_region_free(struct skmem_region *skr, void *addr, void *maddr)
 	}
 
 	ASSERT(sg != NULL);
-	if (sg->sg_state == SKSEG_STATE_MAPPED_WIRED) {
+	if (!(skr->skr_mode & SKR_MODE_PERSISTENT) || sg->sg_state == SKSEG_STATE_MAPPED_WIRED) {
 		ASSERT(skr->skr_w_meminuse >= skr->skr_seg_size);
 		skr->skr_w_meminuse -= skr->skr_seg_size;
 	}
@@ -1475,7 +1287,8 @@ skmem_region_depopulate(struct skmem_region *skr)
 	    skr->skr_name, SK_KVA(skr));
 
 	SKR_LOCK_ASSERT_HELD(skr);
-	ASSERT(skr->skr_seg_bmap_len != 0 || (skr->skr_mode & SKR_MODE_PSEUDO));
+	ASSERT(skr->skr_seg_bmap_len != 0);
+	ASSERT(!(skr->skr_mode & SKR_MODE_PERSISTENT) || (skr->skr_seg_free_cnt <= skr->skr_seg_max_cnt));
 
 	TAILQ_FOREACH_SAFE(sg, &skr->skr_seg_free, sg_link, tsg) {
 		struct sksegment *sg0;
@@ -1487,6 +1300,9 @@ skmem_region_depopulate(struct skmem_region *skr)
 
 		sksegment_destroy(skr, sg);
 		ASSERT(bit_test(skr->skr_seg_bmap[i / BMAPSZ], i % BMAPSZ));
+
+		ASSERT(!(skr->skr_mode & SKR_MODE_PERSISTENT) ||
+		        (skr->skr_seg_lut != NULL && skr->skr_seg_lut[i] == NULL));
 	}
 }
 
@@ -1509,18 +1325,21 @@ sksegment_create(struct skmem_region *skr, uint32_t i)
 {
 	struct sksegment *sg = NULL;
 	bitmap_t *bmap;
+	mach_vm_address_t addr;
+	IOReturn err;
 
 	SKR_LOCK_ASSERT_HELD(skr);
 
-	ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 	ASSERT(i < skr->skr_seg_max_cnt);
 	ASSERT(skr->skr_reg != NULL);
+	ASSERT(!(skr->skr_mode & SKR_MODE_PERSISTENT) ||
+	        (skr->skr_seg_lut != NULL) && (skr->skr_seg_lut[i] != NULL));
 	ASSERT(skr->skr_seg_size == round_page(skr->skr_seg_size));
 
 	bmap = &skr->skr_seg_bmap[i / BMAPSZ];
 	ASSERT(bit_test(*bmap, i % BMAPSZ));
 
-	sg = skmem_cache_alloc(skmem_sg_cache, SKMEM_SLEEP);
+	sg = mcache_alloc(skmem_sg_cache, MCR_SLEEP);
 	bzero(sg, sg_size);
 
 	sg->sg_region = skr;
@@ -1529,6 +1348,29 @@ sksegment_create(struct skmem_region *skr, uint32_t i)
 
 	/* claim it (clear bit) */
 	bit_clear(*bmap, i % BMAPSZ);
+
+	if ((skr->skr_mode & SKR_MODE_PERSISTENT)) {
+        sg->sg_md = IOSKMemoryBufferCreate(skr->skr_seg_size, &skr->skr_bufspec, &addr);
+
+        if (sg->sg_md == NULL) {
+            mcache_free(skmem_sg_cache, sg);
+            return NULL;
+        }
+
+        sg->sg_state = SKSEG_STATE_MAPPED_PERSISTENT;
+
+        sg->sg_start = addr;
+        sg->sg_end = addr + skr->skr_seg_size;
+        ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
+
+        err = IOSKMemoryWire(sg->sg_md);
+        ASSERT(err == kIOReturnSuccess);
+        err = IOSKRegionSetBuffer(skr->skr_reg, sg->sg_index, sg->sg_md);
+        skr->skr_memtotal += skr->skr_seg_size;
+	} else {
+        ASSERT(skr->skr_seg_lut != NULL);
+        skr->skr_seg_lut[i] = sg;
+	}
 
 	SK_DF(SK_VERB_MEM_REGION, "  [%u] [0x%llx-0x%llx) 0x%b", i,
 	    SK_KVA(sg->sg_start), SK_KVA(sg->sg_end), skr->skr_mode,
@@ -1548,10 +1390,11 @@ sksegment_destroy(struct skmem_region *skr, struct sksegment *sg)
 {
 	uint32_t i = sg->sg_index;
 	bitmap_t *bmap;
+	IOSKMemoryBufferRef md;
+	IOReturn err;
 
 	SKR_LOCK_ASSERT_HELD(skr);
 
-	ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 	ASSERT(skr == sg->sg_region);
 	ASSERT(skr->skr_reg != NULL);
 	ASSERT(sg->sg_type == SKSEG_TYPE_DESTROYED);
@@ -1559,6 +1402,8 @@ sksegment_destroy(struct skmem_region *skr, struct sksegment *sg)
 
 	bmap = &skr->skr_seg_bmap[i / BMAPSZ];
 	ASSERT(!bit_test(*bmap, i % BMAPSZ));
+	ASSERT(!(skr->skr_mode & SKR_MODE_PERSISTENT) ||
+	        (skr->skr_seg_lut != NULL) && (skr->skr_seg_lut[i] == sg));
 
 	SK_DF(SK_VERB_MEM_REGION, "  [%u] [0x%llx-0x%llx) 0x%b",
 	    i, SK_KVA(sg->sg_start), SK_KVA(sg->sg_end),
@@ -1567,6 +1412,25 @@ sksegment_destroy(struct skmem_region *skr, struct sksegment *sg)
 	/*
 	 * Undo what's done earlier at segment creation time.
 	 */
+	if (skr->skr_mode & SKR_MODE_PERSISTENT) {
+	    skr->skr_seg_lut[i] = NULL;
+		ASSERT(sg->sg_state == SKSEG_STATE_MAPPED_PERSISTENT);
+		ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
+
+		IOSKRegionClearBufferDebug(skr->skr_reg, sg->sg_index, &md);
+		ASSERT(sg->sg_md == md);
+
+		err = IOSKMemoryUnwire(md);
+		ASSERT(err == kIOReturnSuccess);
+		IOSKMemoryDestroy(md);
+
+		sg->sg_state = SKSEG_STATE_DETACHED;
+		sg->sg_md = NULL;
+		sg->sg_start = 0;
+		sg->sg_end = 0;
+		ASSERT(skr->skr_memtotal >= skr->skr_seg_size);
+		skr->skr_memtotal -= skr->skr_seg_size;
+	}
 
 	ASSERT(sg->sg_md == NULL);
 	ASSERT(sg->sg_start == 0 && sg->sg_end == 0);
@@ -1575,7 +1439,7 @@ sksegment_destroy(struct skmem_region *skr, struct sksegment *sg)
 	/* release it (set bit) */
 	bit_set(*bmap, i % BMAPSZ);
 
-	skmem_cache_free(skmem_sg_cache, sg);
+	mcache_free(skmem_sg_cache, sg);
 }
 
 /*
@@ -1587,7 +1451,6 @@ sksegment_freelist_insert(struct skmem_region *skr, struct sksegment *sg,
 {
 	SKR_LOCK_ASSERT_HELD(skr);
 
-	ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 	ASSERT(sg->sg_type != SKSEG_TYPE_FREE);
 	ASSERT(skr == sg->sg_region);
 	ASSERT(skr->skr_reg != NULL);
@@ -1606,6 +1469,7 @@ sksegment_freelist_insert(struct skmem_region *skr, struct sksegment *sg,
 
 		ASSERT(sg->sg_md != NULL);
 		ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
+		ASSERT(sg->sg_state == SKSEG_STATE_MAPPED_PERSISTENT);
 
 		/*
 		 * Let the client remove the memory from IOMMU, and unwire it.
@@ -1614,43 +1478,41 @@ sksegment_freelist_insert(struct skmem_region *skr, struct sksegment *sg,
 			skr->skr_seg_dtor(sg, sg->sg_md, skr->skr_private);
 		}
 
-		ASSERT(sg->sg_state == SKSEG_STATE_MAPPED ||
-		    sg->sg_state == SKSEG_STATE_MAPPED_WIRED);
+		if (!(skr->skr_mode & SKR_MODE_PERSISTENT)) {
+		    ASSERT(sg->sg_state == SKSEG_STATE_MAPPED ||
+		        sg->sg_state == SKSEG_STATE_MAPPED_WIRED);
 
-		IOSKRegionClearBufferDebug(skr->skr_reg, sg->sg_index, &md);
-		VERIFY(sg->sg_md == md);
+			IOSKRegionClearBufferDebug(skr->skr_reg, sg->sg_index, &md);
+			VERIFY(sg->sg_md == md);
 
-		/* if persistent, unwire this memory now */
-		if (skr->skr_mode & SKR_MODE_PERSISTENT) {
-			err = IOSKMemoryUnwire(md);
-			if (err != kIOReturnSuccess) {
-				panic("Fail to unwire md %p, err %d", md, err);
+			/* if persistent, unwire this memory now */
+			if (skr->skr_mode & SKR_MODE_PERSISTENT) {
+			    err = IOSKMemoryUnwire(md);
+				if (err != kIOReturnSuccess) {
+				    panic("Fail to unwire md %p, err %d", md, err);
+				}
 			}
-		}
 
-		/* mark memory as empty/discarded for consistency */
-		err = IOSKMemoryDiscard(md);
-		if (err != kIOReturnSuccess) {
-			panic("Fail to discard md %p, err %d", md, err);
-		}
+			/* mark memory as empty/discarded for consistency */
+			err = IOSKMemoryDiscard(md);
+			if (err != kIOReturnSuccess) {
+			    panic("Fail to discard md %p, err %d", md, err);
+			}
 
-		IOSKMemoryDestroy(md);
-		sg->sg_md = NULL;
-		sg->sg_start = sg->sg_end = 0;
-		sg->sg_state = SKSEG_STATE_DETACHED;
+			IOSKMemoryDestroy(md);
+			sg->sg_md = NULL;
+			sg->sg_start = sg->sg_end = 0;
+			sg->sg_state = SKSEG_STATE_DETACHED;
 
-		ASSERT(skr->skr_memtotal >= skr->skr_seg_size);
-		skr->skr_memtotal -= skr->skr_seg_size;
+			ASSERT(skr->skr_memtotal >= skr->skr_seg_size);
+			skr->skr_memtotal -= skr->skr_seg_size;
+	    }
 	}
 
 	sg->sg_type = SKSEG_TYPE_FREE;
 	ASSERT(sg->sg_link.tqe_next == NULL);
 	ASSERT(sg->sg_link.tqe_prev == NULL);
 	TAILQ_INSERT_TAIL(&skr->skr_seg_free, sg, sg_link);
-	ASSERT(sg->sg_node.rbe_left == NULL);
-	ASSERT(sg->sg_node.rbe_right == NULL);
-	ASSERT(sg->sg_node.rbe_parent == NULL);
-	RB_INSERT(segtfreehead, &skr->skr_seg_tfree, sg);
 	++skr->skr_seg_free_cnt;
 	ASSERT(skr->skr_seg_free_cnt <= skr->skr_seg_max_cnt);
 }
@@ -1668,7 +1530,6 @@ sksegment_freelist_remove(struct skmem_region *skr, struct sksegment *sg,
 
 	SKR_LOCK_ASSERT_HELD(skr);
 
-	ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 	ASSERT(sg != NULL);
 	ASSERT(skr == sg->sg_region);
 	ASSERT(skr->skr_reg != NULL);
@@ -1693,10 +1554,6 @@ sksegment_freelist_remove(struct skmem_region *skr, struct sksegment *sg,
 	TAILQ_REMOVE(&skr->skr_seg_free, sg, sg_link);
 	sg->sg_link.tqe_next = NULL;
 	sg->sg_link.tqe_prev = NULL;
-	RB_REMOVE(segtfreehead, &skr->skr_seg_tfree, sg);
-	sg->sg_node.rbe_left = NULL;
-	sg->sg_node.rbe_right = NULL;
-	sg->sg_node.rbe_parent = NULL;
 
 	ASSERT(skr->skr_seg_free_cnt != 0);
 	--skr->skr_seg_free_cnt;
@@ -1707,74 +1564,74 @@ sksegment_freelist_remove(struct skmem_region *skr, struct sksegment *sg,
 	if (__improbable(purging)) {
 		ASSERT(sg->sg_md == NULL);
 		ASSERT(sg->sg_start == 0 && sg->sg_end == 0);
-		ASSERT(sg->sg_state == SKSEG_STATE_DETACHED);
+		if ((skr->skr_mode & SKR_MODE_PERSISTENT)) {
+		    ASSERT(sg->sg_state == SKSEG_STATE_MAPPED_PERSISTENT);
+		} else {
+            ASSERT(sg->sg_state == SKSEG_STATE_DETACHED);
+		}
 		sg->sg_type = SKSEG_TYPE_DESTROYED;
 		return sg;
 	}
 
-	ASSERT(sg->sg_md == NULL);
-	ASSERT(sg->sg_start == 0 && sg->sg_end == 0);
-	ASSERT(sg->sg_state == SKSEG_STATE_DETACHED);
+	if (!(skr->skr_mode & SKR_MODE_PERSISTENT)) {
+	    ASSERT(sg->sg_md == NULL);
+		ASSERT(sg->sg_start == 0 && sg->sg_end == 0);
+		ASSERT(sg->sg_state == SKSEG_STATE_DETACHED);
 
-	/* created as non-volatile (mapped) upon success */
-	if ((sg->sg_md = IOSKMemoryBufferCreate(skr->skr_seg_size,
-	    &skr->skr_bufspec, &segstart)) == NULL) {
-		ASSERT(sg->sg_type == SKSEG_TYPE_FREE);
-		if (skmflag & SKMEM_PANIC) {
-			/* if the caller insists for a success then panic */
-			panic_plain("\"%s\": skr 0x%p sg 0x%p (idx %u) unable "
-			    "to satisfy mandatory allocation\n", skr->skr_name,
-			    skr, sg, sg->sg_index);
-			/* NOTREACHED */
-			__builtin_unreachable();
+		/* created as non-volatile (mapped) upon success */
+		if ((sg->sg_md = IOSKMemoryBufferCreate(skr->skr_seg_size,
+	        &skr->skr_bufspec, &segstart)) == NULL) {
+			ASSERT(sg->sg_type == SKSEG_TYPE_FREE);
+			if (skmflag & SKMEM_PANIC) {
+			    /* if the caller insists for a success then panic */
+				panic_plain("\"%s\": skr 0x%p sg 0x%p (idx %u) unable "
+			        "to satisfy mandatory allocation\n", skr->skr_name,
+					skr, sg, sg->sg_index);
+				/* NOTREACHED */
+				__builtin_unreachable();
+			}
+			/* reinsert this segment to freelist */
+			ASSERT(sg->sg_link.tqe_next == NULL);
+			ASSERT(sg->sg_link.tqe_prev == NULL);
+			TAILQ_INSERT_HEAD(&skr->skr_seg_free, sg, sg_link);
+			++skr->skr_seg_free_cnt;
+			return NULL;
 		}
-		/* reinsert this segment to freelist */
-		ASSERT(sg->sg_link.tqe_next == NULL);
-		ASSERT(sg->sg_link.tqe_prev == NULL);
-		TAILQ_INSERT_HEAD(&skr->skr_seg_free, sg, sg_link);
-		ASSERT(sg->sg_node.rbe_left == NULL);
-		ASSERT(sg->sg_node.rbe_right == NULL);
-		ASSERT(sg->sg_node.rbe_parent == NULL);
-		RB_INSERT(segtfreehead, &skr->skr_seg_tfree, sg);
-		++skr->skr_seg_free_cnt;
-		return NULL;
-	}
 
-	sg->sg_start = segstart;
-	sg->sg_end = (segstart + skr->skr_seg_size);
-	ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
+		sg->sg_start = segstart;
+		sg->sg_end = (segstart + skr->skr_seg_size);
+		ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
 
-	/* mark memory as non-volatile just to be consistent */
-	err = IOSKMemoryReclaim(sg->sg_md);
-	if (err != kIOReturnSuccess) {
-		panic("Fail to reclaim md %p, err %d", sg->sg_md, err);
-	}
-
-	/* if persistent, wire down its memory now */
-	if (skr->skr_mode & SKR_MODE_PERSISTENT) {
-		err = IOSKMemoryWire(sg->sg_md);
+		/* mark memory as non-volatile just to be consistent */
+		err = IOSKMemoryReclaim(sg->sg_md);
 		if (err != kIOReturnSuccess) {
-			panic("Fail to wire md %p, err %d", sg->sg_md, err);
+		    panic("Fail to reclaim md %p, err %d", sg->sg_md, err);
+		}
+
+		err = IOSKRegionSetBuffer(skr->skr_reg, sg->sg_index, sg->sg_md);
+		if (err != kIOReturnSuccess) {
+		    panic("Fail to set md %p, err %d", sg->sg_md, err);
+		}
+
+		/*
+	     * Let the client wire it and insert to IOMMU, if applicable.
+		 * Try to find out if it's wired and set the right state.
+		 */
+		if (skr->skr_seg_ctor != NULL) {
+		    skr->skr_seg_ctor(sg, sg->sg_md, skr->skr_private);
+		}
+
+		sg->sg_state = IOSKBufferIsWired(sg->sg_md) ?
+	        SKSEG_STATE_MAPPED_WIRED : SKSEG_STATE_MAPPED;
+
+		skr->skr_memtotal += skr->skr_seg_size;
+	} else {
+        ASSERT(sg->sg_state == SKSEG_STATE_MAPPED_PERSISTENT);
+
+        if (skr->skr_seg_ctor != NULL) {
+		    skr->skr_seg_ctor(sg, sg->sg_md, skr->skr_private);
 		}
 	}
-
-	err = IOSKRegionSetBuffer(skr->skr_reg, sg->sg_index, sg->sg_md);
-	if (err != kIOReturnSuccess) {
-		panic("Fail to set md %p, err %d", sg->sg_md, err);
-	}
-
-	/*
-	 * Let the client wire it and insert to IOMMU, if applicable.
-	 * Try to find out if it's wired and set the right state.
-	 */
-	if (skr->skr_seg_ctor != NULL) {
-		skr->skr_seg_ctor(sg, sg->sg_md, skr->skr_private);
-	}
-
-	sg->sg_state = IOSKBufferIsWired(sg->sg_md) ?
-	    SKSEG_STATE_MAPPED_WIRED : SKSEG_STATE_MAPPED;
-
-	skr->skr_memtotal += skr->skr_seg_size;
 
 	ASSERT(sg->sg_md != NULL);
 	ASSERT(sg->sg_start != 0 && sg->sg_end != 0);
@@ -1794,7 +1651,6 @@ sksegment_freelist_grow(struct skmem_region *skr)
 
 	SKR_LOCK_ASSERT_HELD(skr);
 
-	ASSERT(!(skr->skr_mode & SKR_MODE_PSEUDO));
 	ASSERT(skr->skr_seg_bmap_len != 0);
 	ASSERT(skr->skr_seg_max_cnt != 0);
 
@@ -1817,7 +1673,16 @@ sksegment_freelist_grow(struct skmem_region *skr)
 		--j;
 		idx = (i * BMAPSZ) + j;
 
-		sg = sksegment_alloc_with_idx(skr, idx);
+		/* must not fail, blocking alloc */
+		sg = sksegment_create(skr, idx);
+		VERIFY(sg != NULL);
+		VERIFY(!bit_test(skr->skr_seg_bmap[idx / BMAPSZ], idx % BMAPSZ));
+
+		/* populate the freelist */
+		sksegment_freelist_insert(skr, sg, TRUE);
+		ASSERT(sg == TAILQ_LAST(&skr->skr_seg_free, segfreehead));
+
+		SK_DF(SK_VERB_MEM_REGION, "sg %u/%u", (idx + 1), skr->skr_seg_max_cnt);
 
 		/* we're done */
 		break;
@@ -1853,10 +1718,6 @@ sksegment_alloc_with_idx(struct skmem_region *skr, uint32_t idx)
 	/* populate the freelist */
 	sksegment_freelist_insert(skr, sg, TRUE);
 	ASSERT(sg == TAILQ_LAST(&skr->skr_seg_free, segfreehead));
-#if (DEVELOPMENT || DEBUG)
-	struct sksegment sg_key = { .sg_index = sg->sg_index };
-	ASSERT(sg == RB_FIND(segtfreehead, &skr->skr_seg_tfree, &sg_key));
-#endif /* (DEVELOPMENT || DEBUG) */
 
 	SK_DF(SK_VERB_MEM_REGION, "sg %u/%u", (idx + 1), skr->skr_seg_max_cnt);
 
@@ -1872,12 +1733,6 @@ skmem_region_hash_rescale(struct skmem_region *skr)
 	struct sksegment_bkt *old_table, *new_table;
 	size_t old_size, new_size;
 	uint32_t i, moved = 0;
-
-	if (skr->skr_mode & SKR_MODE_PSEUDO) {
-		ASSERT(skr->skr_hash_table == NULL);
-		/* this is no-op for pseudo region */
-		return;
-	}
 
 	ASSERT(skr->skr_hash_table != NULL);
 	/* insist that we are executing in the update thread call context */
@@ -1898,7 +1753,7 @@ skmem_region_hash_rescale(struct skmem_region *skr)
 	}
 
 	new_table = sk_alloc_type_array(struct sksegment_bkt, new_size,
-	    Z_NOWAIT, skmem_tag_segment_hash);
+	    M_NOWAIT, skmem_tag_segment_hash);
 	if (__improbable(new_table == NULL)) {
 		return;
 	}
@@ -2003,129 +1858,6 @@ skmem_region_update_func(thread_call_param_t dummy, thread_call_param_t arg)
 	    (skmem_region_update_interval * NSEC_PER_SEC));
 }
 
-boolean_t
-skmem_region_for_pp(skmem_region_id_t id)
-{
-	int i;
-
-	for (i = 0; i < SKMEM_PP_REGIONS; i++) {
-		if (id == skmem_pp_region_ids[i]) {
-			return TRUE;
-		}
-	}
-	return FALSE;
-}
-
-void
-skmem_region_get_stats(struct skmem_region *skr, struct sk_stats_region *sreg)
-{
-	bzero(sreg, sizeof(*sreg));
-
-	(void) snprintf(sreg->sreg_name, sizeof(sreg->sreg_name),
-	    "%s", skr->skr_name);
-	uuid_copy(sreg->sreg_uuid, skr->skr_uuid);
-	sreg->sreg_id = (sk_stats_region_id_t)skr->skr_id;
-	sreg->sreg_mode = skr->skr_mode;
-
-	sreg->sreg_r_seg_size = skr->skr_params.srp_r_seg_size;
-	sreg->sreg_c_seg_size = skr->skr_seg_size;
-	sreg->sreg_seg_cnt = skr->skr_seg_max_cnt;
-	sreg->sreg_seg_objs = skr->skr_seg_objs;
-	sreg->sreg_r_obj_size = skr->skr_r_obj_size;
-	sreg->sreg_r_obj_cnt = skr->skr_r_obj_cnt;
-	sreg->sreg_c_obj_size = skr->skr_c_obj_size;
-	sreg->sreg_c_obj_cnt = skr->skr_c_obj_cnt;
-	sreg->sreg_align = skr->skr_align;
-	sreg->sreg_max_frags = skr->skr_max_frags;
-
-	sreg->sreg_meminuse = skr->skr_meminuse;
-	sreg->sreg_w_meminuse = skr->skr_w_meminuse;
-	sreg->sreg_memtotal = skr->skr_memtotal;
-	sreg->sreg_seginuse = skr->skr_seginuse;
-	sreg->sreg_rescale = skr->skr_rescale;
-	sreg->sreg_hash_size = (skr->skr_hash_mask + 1);
-	sreg->sreg_alloc = skr->skr_alloc;
-	sreg->sreg_free = skr->skr_free;
-}
-
-static size_t
-skmem_region_mib_get_stats(struct skmem_region *skr, void *out, size_t len)
-{
-	size_t actual_space = sizeof(struct sk_stats_region);
-	struct sk_stats_region *sreg = out;
-
-	if (out == NULL || len < actual_space) {
-		goto done;
-	}
-
-	skmem_region_get_stats(skr, sreg);
-
-done:
-	return actual_space;
-}
-
-static int
-skmem_region_mib_get_sysctl SYSCTL_HANDLER_ARGS
-{
-#pragma unused(arg1, arg2, oidp)
-	struct skmem_region *skr;
-	size_t actual_space;
-	size_t buffer_space;
-	size_t allocated_space;
-	caddr_t buffer = NULL;
-	caddr_t scan;
-	int error = 0;
-
-	if (!kauth_cred_issuser(kauth_cred_get())) {
-		return EPERM;
-	}
-
-	net_update_uptime();
-	buffer_space = req->oldlen;
-	if (req->oldptr != USER_ADDR_NULL && buffer_space != 0) {
-		if (buffer_space > SK_SYSCTL_ALLOC_MAX) {
-			buffer_space = SK_SYSCTL_ALLOC_MAX;
-		}
-		allocated_space = buffer_space;
-		buffer = sk_alloc_data(allocated_space, Z_WAITOK, skmem_tag_region_mib);
-		if (__improbable(buffer == NULL)) {
-			return ENOBUFS;
-		}
-	} else if (req->oldptr == USER_ADDR_NULL) {
-		buffer_space = 0;
-	}
-	actual_space = 0;
-	scan = buffer;
-
-	SKMEM_REGION_LOCK();
-	TAILQ_FOREACH(skr, &skmem_region_head, skr_link) {
-		size_t size = skmem_region_mib_get_stats(skr, scan, buffer_space);
-		if (scan != NULL) {
-			if (buffer_space < size) {
-				/* supplied buffer too small, stop copying */
-				error = ENOMEM;
-				break;
-			}
-			scan += size;
-			buffer_space -= size;
-		}
-		actual_space += size;
-	}
-	SKMEM_REGION_UNLOCK();
-
-	if (actual_space != 0) {
-		int out_error = SYSCTL_OUT(req, buffer, actual_space);
-		if (out_error != 0) {
-			error = out_error;
-		}
-	}
-	if (buffer != NULL) {
-		sk_free_data(buffer, allocated_space);
-	}
-
-	return error;
-}
-
 #if SK_LOG
 const char *
 skmem_region_id2name(skmem_region_id_t id)
@@ -2144,16 +1876,8 @@ skmem_region_id2name(skmem_region_id_t id)
 		name = "BUF";
 		break;
 
-	case SKMEM_REGION_RXBUF:
-		name = "RXBUF";
-		break;
-
-	case SKMEM_REGION_TXBUF:
-		name = "TXBUF";
-		break;
-
-	case SKMEM_REGION_UMD:
-		name = "UMD";
+	case SKMEM_REGION_MDU:
+		name = "MDU";
 		break;
 
 	case SKMEM_REGION_TXAUSD:
@@ -2180,24 +1904,8 @@ skmem_region_id2name(skmem_region_id_t id)
 		name = "SYSCTLS";
 		break;
 
-	case SKMEM_REGION_GUARD_HEAD:
-		name = "HEADGUARD";
-		break;
-
-	case SKMEM_REGION_GUARD_TAIL:
-		name = "TAILGUARD";
-		break;
-
-	case SKMEM_REGION_KMD:
-		name = "KMD";
-		break;
-
-	case SKMEM_REGION_RXKMD:
-		name = "RXKMD";
-		break;
-
-	case SKMEM_REGION_TXKMD:
-		name = "TXKMD";
+	case SKMEM_REGION_MDK:
+		name = "MDK";
 		break;
 
 	case SKMEM_REGION_TXAKSD:
@@ -2210,26 +1918,6 @@ skmem_region_id2name(skmem_region_id_t id)
 
 	case SKMEM_REGION_KSTATS:
 		name = "KSTATS";
-		break;
-
-	case SKMEM_REGION_KBFT:
-		name = "KBFT";
-		break;
-
-	case SKMEM_REGION_UBFT:
-		name = "UBFT";
-		break;
-
-	case SKMEM_REGION_RXKBFT:
-		name = "RXKBFT";
-		break;
-
-	case SKMEM_REGION_TXKBFT:
-		name = "TXKBFT";
-		break;
-
-	case SKMEM_REGION_INTRINSIC:
-		name = "INTRINSIC";
 		break;
 
 	default:

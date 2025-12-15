@@ -69,7 +69,6 @@ struct skmem_region;
  */
 struct sksegment {
 	TAILQ_ENTRY(sksegment)  sg_link;        /* sksegment linkage */
-	RB_ENTRY(sksegment)     sg_node;        /* sksegment node in tree */
 	struct skmem_region     *sg_region;     /* controlling region */
 
 	/*
@@ -261,50 +260,33 @@ struct skmem_region {
 /* valid values for skr_mode */
 #define SKR_MODE_NOREDIRECT     0x1     /* unaffect by defunct */
 #define SKR_MODE_MMAPOK         0x2     /* can be mapped to user task */
-#define SKR_MODE_KREADONLY      0x4     /* kernel read only */
-#define SKR_MODE_UREADONLY      0x8     /* if user map, map it read-only */
-#define SKR_MODE_PERSISTENT     0x10    /* memory stays non-volatile */
-#define SKR_MODE_MONOLITHIC     0x20    /* monolithic region */
-#define SKR_MODE_NOMAGAZINES    0x40    /* disable magazines layer */
-#define SKR_MODE_NOCACHE        0x80    /* caching-inhibited */
-#define SKR_MODE_SEGPHYSCONTIG  0x100   /* phys. contiguous segment */
-#define SKR_MODE_SHAREOK        0x200   /* allow object sharing */
-#define SKR_MODE_IODIR_IN       0x400   /* I/O direction In */
-#define SKR_MODE_IODIR_OUT      0x800   /* I/O direction Out */
-#define SKR_MODE_GUARD          0x1000  /* guard pages region */
-#define SKR_MODE_PUREDATA       0x2000  /* purely data; no pointers */
-#define SKR_MODE_PSEUDO         0x4000  /* external backing store */
+#define SKR_MODE_READONLY       0x4     /* read only */
+#define SKR_MODE_PERSISTENT     0x8     /* memory stays non-volatile */
+#define SKR_MODE_MONOLITHIC     0x10    /* monolithic region */
+#define SKR_MODE_NOMAGAZINES    0x20    /* disable magazines layer */
+#define SKR_MODE_NOCACHE        0x40    /* caching-inhibited */
+#define SKR_MODE_SEGPHYSCONTIG  0x80    /* phys. contiguous segment */
 #define SKR_MODE_SLAB           (1U << 30) /* backend for slab layer */
 #define SKR_MODE_MIRRORED       (1U << 31) /* controlled by another region */
 
 #define SKR_MODE_BITS           \
-	"\020\01NOREDIRECT\02MMAPOK\03KREADONLY\04UREADONLY"    \
-	"\05PERSISTENT\06MONOLITHIC\07NOMAGAZINES\10NOCACHE"    \
-	"\11SEGPHYSCONTIG\012SHAREOK\013IODIR_IN\014IODIR_OUT"  \
-	"\015GUARD\016PUREDATA\017PSEUDO\037SLAB\040MIRRORED"
+	"\020\01NOREDIRECT\02MMAPOK\03READONLY\04PERSISTENT"    \
+	"\05MONOLITHIC\06NOMAGAZINES\10NOCACHE\11SEGPHYSCONTIG"    \
+	"\037SLAB\040MIRRORED"
 
 /* valid values for skmem_region_create() */
 #define SKMEM_REGION_CR_NOREDIRECT      0x1     /* unaffected by defunct */
 #define SKMEM_REGION_CR_MMAPOK          0x2     /* can be mapped to user task */
-#define SKMEM_REGION_CR_KREADONLY       0x4     /* kernel space readonly */
-#define SKMEM_REGION_CR_UREADONLY       0x8     /* if user map, map it RO */
-#define SKMEM_REGION_CR_PERSISTENT      0x10    /* memory stays non-volatile */
-#define SKMEM_REGION_CR_MONOLITHIC      0x20    /* monolithic region */
-#define SKMEM_REGION_CR_NOMAGAZINES     0x40    /* disable magazines layer */
-#define SKMEM_REGION_CR_NOCACHE         0x80    /* caching-inhibited */
-#define SKMEM_REGION_CR_SEGPHYSCONTIG   0x100   /* phys. contiguous segment */
-#define SKMEM_REGION_CR_SHAREOK         0x200   /* allow object sharing */
-#define SKMEM_REGION_CR_IODIR_IN        0x400   /* I/O direction in */
-#define SKMEM_REGION_CR_IODIR_OUT       0x800   /* I/O direction out */
-#define SKMEM_REGION_CR_GUARD           0x1000  /* guard pages region */
-#define SKMEM_REGION_CR_PUREDATA        0x2000  /* purely data; no pointers */
-#define SKMEM_REGION_CR_PSEUDO          0x4000  /* external backing store */
+#define SKMEM_REGION_CR_READONLY        0x4     /* readonly */
+#define SKMEM_REGION_CR_PERSISTENT      0x8     /* memory stays non-volatile */
+#define SKMEM_REGION_CR_MONOLITHIC      0x10    /* monolithic region */
+#define SKMEM_REGION_CR_NOMAGAZINES     0x20    /* disable magazines layer */
+#define SKMEM_REGION_CR_NOCACHE         0x40    /* caching-inhibited */
+#define SKMEM_REGION_CR_SEGPHYSCONTIG   0x80    /* phys. contiguous segment */
 
 #define SKMEM_REGION_CR_BITS    \
-	"\020\01NOREDIRECT\02MMAPOK\03KREADONLY\04UREADONLY"    \
-	"\05PERSISTENT\06MONOLITHIC\07NOMAGAZINES\10NOCACHE"    \
-	"\11SEGPHYSCONTIG\012SHAREOK\013IODIR_IN\014IODIR_OUT"  \
-	"\015GUARD\016PUREDATA\017PSEUDO"
+	"\020\01NOREDIRECT\02MMAPOK\03READONLY\04PERSISTENT"    \
+	"\05MONOLITHIC\06NOMAGAZINES\10NOCACHE\11SEGPHYSCONTIG"
 
 __BEGIN_DECLS
 extern void skmem_region_init(void);
@@ -326,9 +308,6 @@ extern mach_vm_address_t skmem_region_obj_lookup(struct skmem_region *,
     uint32_t);
 extern int skmem_region_get_info(struct skmem_region *, uint32_t *,
     struct sksegment **);
-extern boolean_t skmem_region_for_pp(skmem_region_id_t);
-extern void skmem_region_get_stats(struct skmem_region *,
-    struct sk_stats_region *);
 #if (DEVELOPMENT || DEBUG)
 extern uint64_t skmem_region_get_mtbf(void);
 /*
