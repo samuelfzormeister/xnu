@@ -93,6 +93,7 @@
 #include <sys/lock.h>
 #include <sys/queue.h>
 #include <machine/endian.h>
+#include <machine/param.h>
 /*
  * Mbufs are of a single size, MSIZE (machine/param.h), which
  * includes overhead.  An mbuf may add a single "mbuf cluster" of size
