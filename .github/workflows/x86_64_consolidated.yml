@@ -54,7 +54,7 @@ jobs:
           run: |
             export MAKEFLAGS="--jobs=3"
             cd ~/xnu/
-            make EMBEDDED_DEVICE_MAP=$(xcrun -f embedded_device_map) EDM_DBPATH=$(xcrun --sdk macosx -show-sdk-platform-path)/usr/local/standalone/firmware/device_map.db DO_CTFMERGE=0 USE_WERROR=0 OBJROOT=$PWD DSTROOT=$(xcrun --sdk macosx -show-sdk-path) ARCH_CONFIGS="X86_64" installhdrs
+            make EMBEDDED_DEVICE_MAP=$(xcrun -f embedded_device_map) EDM_DBPATH=$(xcrun --sdk macosx -show-sdk-platform-path)/usr/local/standalone/firmware/device_map.db DO_CTFMERGE=0 USE_WERROR=0 OBJROOT=$PWD DSTROOT=$(xcrun --sdk macosx -show-sdk-path) ARCH_CONFIGS="X86_64" KERNEL_CONFIGS="RELEASE" installhdrs
         - name: Prepare libfirehose_kernel
           run: |
             cd ~/libdispatch
