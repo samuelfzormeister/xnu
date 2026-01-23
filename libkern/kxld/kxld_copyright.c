@@ -53,7 +53,7 @@
 #define kRightsTokenPureDarwin2 " The PureDarwin Project. All rights reserved."
 
 // funsies in the event i go off the rails and need Private KPI access on my own projects.
-#define kRightsTokenZormeister " Zormeister. All rights reserved."
+#define kRightsTokenZormeister " Samuel Zormeister. All rights reserved."
 
 /******************************************************************************
 * Globals
