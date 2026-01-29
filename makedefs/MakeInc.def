@@ -202,16 +202,24 @@ ARCH_FLAGS_X86_64H	  = -arch x86_64h
 ifneq ($(filter ARM ARM64,$(CURRENT_ARCH_CONFIG)),)
 
 ifndef ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG
+ifneq ($(EMBEDDED_DEVICE_MAP),)
 export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell $(EMBEDDED_DEVICE_MAP) -db $(EDM_DBPATH) -query SELECT DISTINCT KernelMachOArchitecture FROM Targets WHERE KernelPlatform IS \"$(CURRENT_MACHINE_CONFIG_LC)\" LIMIT 1 || echo UNKNOWN )
+else
+export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CONFIG) | tr A-Z a-z)
+endif
 endif
 
 #
 # This can have false negatives, and is used to avoid calling CTF when we'll build a static KC
 #
 ifndef WILL_BUILD_STATIC_KC
+ifneq ($(EMBEDDED_DEVICE_MAP),)
 export WILL_BUILD_STATIC_KC := $(shell $(EMBEDDED_DEVICE_MAP) -db $(EDM_DBPATH)	\
 				-query 'SELECT COUNT(*) != 0 FROM Targets WHERE KernelPlatform IS "$(CURRENT_MACHINE_CONFIG_LC)" \
 					AND (KernelMachOArchitecture LIKE "arm64e" OR ProductType LIKE "iphone10,%")')
+else
+export WILL_BUILD_STATIC_KC := 0
+endif
 endif
 
 BUILD_STATIC_LINK := 1
@@ -220,6 +228,11 @@ endif
 
 ARCH_FLAGS_ARM		  = -arch $(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)
 ARCH_FLAGS_ARM64	  = -arch $(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)
+
+# non arm machine config string
+ifndef ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG
+export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CONFIG) | tr A-Z a-z)
+endif
 
 #
 # Clang static analyzer flags
@@ -313,8 +326,19 @@ CFLAGS_X86_64H = $(CFLAGS_X86_64)
 CFLAGS_ARM	= -Darm -DARM -D__ARM__ -DPAGE_SIZE_FIXED \
 			-momit-leaf-frame-pointer -fno-strict-aliasing -D__API__=v4
 
-CFLAGS_ARM64	= -Darm64 -DARM64 -D__ARM64__ -DLP64 -DPAGE_SIZE_FIXED \
-			-momit-leaf-frame-pointer -fno-strict-aliasing -D__API__=v4 -mkernel
+LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY
+ARM64_PLKSEG_ADDR  =0xfffffff004004000
+ARM64_LINK_ADDR    =0xfffffff007004000
+
+# Use ARM_LARGE_MEMORY config for all MacOSX targets.
+ifneq ($(filter $(PLATFORM),MacOSX),)
+LARGE_MEMORY_DEFINE=-DARM_LARGE_MEMORY=1
+ARM64_PLKSEG_ADDR  =0xfffffe0004004000
+ARM64_LINK_ADDR    =0xfffffe0007004000
+endif
+
+CFLAGS_ARM64	= -Darm64 -DARM64 -D__ARM64__ -DLP64 -DPAGE_SIZE_FIXED -DVM_KERNEL_LINK_ADDRESS=$(ARM64_LINK_ADDR) \
+			$(LARGE_MEMORY_DEFINE) -momit-leaf-frame-pointer -fno-strict-aliasing -D__API__=v4 -mkernel
 
 CFLAGS_RELEASEX86_64 = -O2
 CFLAGS_DEVELOPMENTX86_64 = -O2
@@ -621,8 +645,8 @@ LDFLAGS_KERNEL_EXPORTS_DEBUGARM = $(LDFLAGS_KERNEL_EXPORTS_DEVELOPMENTARM)
 LDFLAGS_KERNEL_GENARM64 = \
 	-Wl,-pie \
 	-Wl,-static \
-	-Wl,-segaddr,__PRELINK_TEXT,0xfffffff004004000 \
-	-Wl,-image_base,0xfffffff007004000 \
+	-Wl,-segaddr,__PRELINK_TEXT,$(ARM64_PLKSEG_ADDR) \
+	-Wl,-image_base,$(ARM64_LINK_ADDR) \
 	-Wl,-sectalign,__DATA,__const,0x4000 \
 	-Wl,-rename_section,__DATA,__mod_init_func,__DATA_CONST,__mod_init_func \
 	-Wl,-rename_section,__DATA,__mod_term_func,__DATA_CONST,__mod_term_func \
@@ -689,13 +713,15 @@ LD_KERNEL_ARCHIVES = $(LDFLAGS_KERNEL_SDK) -lfirehose_kernel
 ifndef DO_CTFMERGE
 DO_CTFMERGE := 1
 ifeq ($(CURRENT_KERNEL_CONFIG),RELEASE)
-ifneq ($(filter ARM%,$(CURRENT_ARCH_CONFIG)),)
+ifneq ($(PLATFORM),MacOSX)
 DO_CTFMERGE := 0
 endif
 endif
 ifneq ($(CURRENT_KERNEL_CONFIG),KASAN)
+ifneq ($(PLATFORM),MacOSX)
 ifeq ($(WILL_BUILD_STATIC_KC),1)
 DO_CTFMERGE := 0
+endif
 endif
 endif
 endif # DO_CTFMERGE
