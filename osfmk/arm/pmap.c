@@ -11892,10 +11892,8 @@ pmap_create_sharedpage(
  * with user controlled TTEs.
  */
 #if (ARM_PGSHIFT == 14)
-static_assert((_COMM_PAGE64_BASE_ADDRESS & ~ARM_TT_L2_OFFMASK) >= MACH_VM_MAX_ADDRESS);
 static_assert((_COMM_PAGE32_BASE_ADDRESS & ~ARM_TT_L2_OFFMASK) >= VM_MAX_ADDRESS);
 #elif (ARM_PGSHIFT == 12)
-static_assert((_COMM_PAGE64_BASE_ADDRESS & ~ARM_TT_L1_OFFMASK) >= MACH_VM_MAX_ADDRESS);
 static_assert((_COMM_PAGE32_BASE_ADDRESS & ~ARM_TT_L1_OFFMASK) >= VM_MAX_ADDRESS);
 #else
 #error Nested shared page mapping is unsupported on this config
