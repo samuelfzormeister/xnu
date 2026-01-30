@@ -187,18 +187,22 @@
 /*
  * Values in EDX returned by CPUID Leaf 7, subleaf 0
  */
-#define CPUID_LEAF7_EXTFEATURE_AVX5124VNNIW     _Bit(2)         /* AVX512_4VNNIW */
-#define CPUID_LEAF7_EXTFEATURE_AVX5124FMAPS     _Bit(3)         /* AVX512_4FMAPS */
-#define CPUID_LEAF7_EXTFEATURE_FSREPMOV         _Bit(4)         /* Fast Short REP MOV */
-#define CPUID_LEAF7_EXTFEATURE_SRBDS_CTRL       _Bit(9)         /* SRBDS MSR Presence and Mitigation Control */
-#define CPUID_LEAF7_EXTFEATURE_MDCLEAR          _Bit(10)        /* Overloaded VERW / L1D_FLUSH */
-#define CPUID_LEAF7_EXTFEATURE_TSXFA            _Bit(13)        /* TSX RTM_FORCE_ABORT MSR */
-#define CPUID_LEAF7_EXTFEATURE_IBRS             _Bit(26)        /* IBRS / IBPB */
-#define CPUID_LEAF7_EXTFEATURE_STIBP            _Bit(27)        /* Single Thread Indirect Branch Predictors */
-#define CPUID_LEAF7_EXTFEATURE_L1DF             _Bit(28)        /* L1D_FLUSH MSR */
-#define CPUID_LEAF7_EXTFEATURE_ACAPMSR          _Bit(29)        /* ARCH_CAP MSR */
-#define CPUID_LEAF7_EXTFEATURE_CCAPMSR          _Bit(30)        /* CORE_CAP MSR */
-#define CPUID_LEAF7_EXTFEATURE_SSBD             _Bit(31)        /* Speculative Store Bypass Disable */
+#define CPUID_LEAF7_EXTFEATURE_SGX_ATTESTATION      _Bit(1)			/* SGX Attestation */
+#define CPUID_LEAF7_EXTFEATURE_AVX5124VNNIW         _Bit(2)         /* AVX512_4VNNIW */
+#define CPUID_LEAF7_EXTFEATURE_AVX5124FMAPS         _Bit(3)         /* AVX512_4FMAPS */
+#define CPUID_LEAF7_EXTFEATURE_FSREPMOV             _Bit(4)         /* Fast Short REP MOV */
+#define CPUID_LEAF7_EXTFEATURE_USER_IPIS            _Bit(5)			/* User IPIs. May Hexley have mercy on us all. */
+#define CPUID_LEAF7_EXTFEATURE_AVX512VP2INTERSECT   _Bit(8)         /* AVX-512 VP2INTERSECT */
+#define CPUID_LEAF7_EXTFEATURE_SRBDS_CTRL           _Bit(9)         /* SRBDS MSR Presence and Mitigation Control */
+#define CPUID_LEAF7_EXTFEATURE_MDCLEAR              _Bit(10)        /* Overloaded VERW / L1D_FLUSH */
+#define CPUID_LEAF7_EXTFEATURE_TSXFA                _Bit(13)        /* TSX RTM_FORCE_ABORT MSR */
+#define CPUID_LEAF7_EXTFEATURE_HYBRID				_Bit(15)		/* Hybrid x86 Topology. */
+#define CPUID_LEAF7_EXTFEATURE_IBRS                 _Bit(26)        /* IBRS / IBPB */
+#define CPUID_LEAF7_EXTFEATURE_STIBP                _Bit(27)        /* Single Thread Indirect Branch Predictors */
+#define CPUID_LEAF7_EXTFEATURE_L1DF                 _Bit(28)        /* L1D_FLUSH MSR */
+#define CPUID_LEAF7_EXTFEATURE_ACAPMSR              _Bit(29)        /* ARCH_CAP MSR */
+#define CPUID_LEAF7_EXTFEATURE_CCAPMSR              _Bit(30)        /* CORE_CAP MSR */
+#define CPUID_LEAF7_EXTFEATURE_SSBD                 _Bit(31)        /* Speculative Store Bypass Disable */
 
 /*
  * Leaf 7, subleaf 1 features
@@ -495,6 +499,21 @@ typedef struct {
 	boolean_t       ACNT_MCNT;
 	boolean_t       hardware_feedback;
 	boolean_t       energy_policy;
+	boolean_t		hwp;
+	boolean_t		hwp_notif;
+	boolean_t		hwp_activity_window;
+	boolean_t		hwp_energy_perf_pref;
+	boolean_t		hwp_pkg_level_req;
+	boolean_t		hdc;
+	boolean_t		turbo_boost_v3;
+	boolean_t		hwp_caps_change_intr;
+	boolean_t		hwp_peci_override;
+	boolean_t		flexible_hwp;
+	boolean_t		fast_access_mode;
+	boolean_t		hardware_feedback_ix;
+	boolean_t		hwp_cntl_msr;
+	boolean_t		itd;
+	boolean_t		therm_intr_bit25;
 } cpuid_thermal_leaf_t;
 
 
