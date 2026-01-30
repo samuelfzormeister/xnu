@@ -52,7 +52,7 @@ typedef struct {
     itd_caps_t itd;
 } hfi_caps_t;
 
-boolean_t hfi_is_itd_capable(void);`
+boolean_t hfi_is_itd_capable(void);
 
 
 #endif 
