@@ -27,4 +27,22 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <i386/cpuid.h>
 #include <i386/hfi.h>
+
+#define DBG(...) kprintf("hfi: " __VA_ARGS__)
+
+void hfi_bootstrap(void)
+{
+    i386_cpu_info_t *cpu_infop = cpuid_info();
+    cpuid_reg_t
+
+    DBG("begin bootstrap...\n");
+
+    if (cpu_infop->cpuid_thermal_leaf->hardware_feedback_ix == 0) {
+        DBG("Hardware Feedback Intreface is not supported.\n");
+        return;
+    }
+
+    DBG("Hardware Feedback Interface is supported.\n");
+}

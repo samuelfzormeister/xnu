@@ -18,6 +18,7 @@ EXPORT_ONLY_FILES =	\
 		    cpuid.h \
 		    eflags.h \
 		    fpu.h \
+			hfi.h \
 		    io_map_entries.h \
 		    lapic.h \
 		    lock.h \

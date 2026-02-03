@@ -944,6 +944,8 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		ctp->ACNT_MCNT            = bitfield32(reg[ecx], 0, 0);
 		ctp->hardware_feedback    = bitfield32(reg[ecx], 1, 1);
 		ctp->energy_policy        = bitfield32(reg[ecx], 3, 3);
+		ctp->hardware_feedback_ix = bitfield32(reg[ecx], 19, 19);
+		ctp->itd                  = bitfield32(reg[ecx], 23, 23);
 		info_p->cpuid_thermal_leafp = ctp;
 
 		DBG(" Thermal/Power Leaf:\n");
@@ -957,6 +959,8 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		DBG("  ACNT_MCNT            : %d\n", ctp->ACNT_MCNT);
 		DBG("  ACNT2                : %d\n", ctp->hardware_feedback);
 		DBG("  energy_policy        : %d\n", ctp->energy_policy);
+		DBG("  hardware_feedback_ix : %d\n", ctp->hardware_feedback_ix);
+		DBG("  itd					: %d\n", ctp->itd);
 	}
 
 	if (info_p->cpuid_max_basic >= 0xa) {
