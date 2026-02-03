@@ -30,19 +30,38 @@
 #include <i386/cpuid.h>
 #include <i386/hfi.h>
 
+//************************************************************************************************
+// Intel's Hardware Feedback Interface is a feature in Alder Lake and newer processors.
+//
+// AMD; However, ALSO has a Hardware Feedback Interface.
+//
+// TODO:
+// Modularise the HFI subsystem.
+//************************************************************************************************
+
 #define DBG(...) kprintf("hfi: " __VA_ARGS__)
+
+static hfi_caps_t hfi_caps;
 
 void hfi_bootstrap(void)
 {
     i386_cpu_info_t *cpu_infop = cpuid_info();
-    cpuid_reg_t
+    uint32_t reg[4];
 
     DBG("begin bootstrap...\n");
 
-    if (cpu_infop->cpuid_thermal_leaf->hardware_feedback_ix == 0) {
+    if (cpu_infop->cpuid_thermal_leaf.hardware_feedback_ix == 0) {
         DBG("Hardware Feedback Intreface is not supported.\n");
         return;
     }
 
     DBG("Hardware Feedback Interface is supported.\n");
+
+    cpuid_fn(6, reg);
+
+    //
+    // get capabilities
+    //
+    hfi_caps.hfi_perf_cap       = bitfield32(reg[edx], 0, 0);
+    hfi_caps.hfi_efficiency_cap = bitfield32(reg[edx], 1, 1);
 }
