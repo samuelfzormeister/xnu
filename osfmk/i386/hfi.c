@@ -57,7 +57,7 @@ void hfi_bootstrap(void)
 
     DBG("Hardware Feedback Interface is supported.\n");
 
-    cpuid_fn(6, reg);
+    do_cpuid(6, reg);
 
     //
     // get capabilities
