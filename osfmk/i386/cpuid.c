@@ -285,22 +285,44 @@ static const char *cache_type_str[LCACHE_MAX] = {
 	"Lnone", "L1I", "L1D", "L2U", "L3U"
 };
 
-static void
-do_cwas(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+static cwa_classifier_e dummy_enabled(i386_cpu_info_t *cpuinfo)
 {
-	extern int force_thread_policy_tecs;
+	return CWA_OFF;
+}
 
-	/*
-	 * Workaround for reclaiming perf counter 3 due to TSX memory ordering erratum.
-	 * This workaround does not support being forcibly set (since an MSR must be
-	 * enumerated, lest we #GP when forced to access it.)
-	 */
-	if (cpuid_wa_required(CPU_INTEL_TSXFA) == CWA_ON) {
-		/* This must be executed on all logical processors */
-		wrmsr64(MSR_IA32_TSX_FORCE_ABORT,
-		    rdmsr64(MSR_IA32_TSX_FORCE_ABORT) | MSR_IA32_TSXFA_RTM_FORCE_ABORT);
+static void dummy_apply(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+{
+}
+
+static cwa_classifier_e intel_segchk_enabled(i386_cpu_info_t *cpuinfo)
+{
+	/* First, check to see if this CPU requires the workaround */
+	if ((cpuinfo->cpuid_leaf7_extfeatures & CPUID_LEAF7_EXTFEATURE_ACAPMSR) != 0) {
+		/* We have ARCHCAP, so check it for either RDCL_NO or MDS_NO */
+		uint64_t archcap_msr = rdmsr64(MSR_IA32_ARCH_CAPABILITIES);
+		if ((archcap_msr & (MSR_IA32_ARCH_CAPABILITIES_RDCL_NO | MSR_IA32_ARCH_CAPABILITIES_MDS_NO)) != 0) {
+			/* Workaround not needed */
+			return CWA_OFF;
+		}
 	}
 
+	if ((cpuinfo->cpuid_leaf7_extfeatures & CPUID_LEAF7_EXTFEATURE_MDCLEAR) != 0) {
+		return CWA_ON;
+	}
+
+	/*
+	 * If the CPU supports the ARCHCAP MSR and neither the RDCL_NO bit nor the MDS_NO
+	 * bit are set, OR the CPU does not support the ARCHCAP MSR and the CPU does
+	 * not enumerate the presence of the enhanced VERW instruction, report
+	 * that the workaround should not be enabled.
+	 */
+
+	return CWA_OFF;
+}
+
+static void intel_segchk_apply(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+{
+	extern int force_thread_policy_tecs;
 
 	if (on_slave) {
 		return;
@@ -329,6 +351,72 @@ do_cwas(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
 
 	default:
 		break;
+	}
+}
+
+static cwa_classifier_e intel_tsxfa_enabled(i386_cpu_info_t *cpuinfo)
+{
+	/*
+	 * Otherwise, if the CPU supports both TSX(HLE) and FORCE_ABORT, return that
+	 * the workaround should be enabled.
+	 */
+	if ((cpuinfo->cpuid_leaf7_extfeatures & CPUID_LEAF7_EXTFEATURE_TSXFA) != 0 &&
+	    (cpuinfo->cpuid_leaf7_features & CPUID_LEAF7_FEATURE_RTM) != 0) {
+		return CWA_ON;
+	}
+
+	return CWA_OFF;
+}
+
+/*
+ * Workaround for reclaiming perf counter 3 due to TSX memory ordering erratum.
+ * This workaround does not support being forcibly set (since an MSR must be
+ * enumerated, lest we #GP when forced to access it.)
+ */
+static void intel_tsxfa_apply(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+{
+	/* This must be executed on all logical processors */
+	wrmsr64(MSR_IA32_TSX_FORCE_ABORT,
+		 rdmsr64(MSR_IA32_TSX_FORCE_ABORT) | MSR_IA32_TSXFA_RTM_FORCE_ABORT);
+}
+
+/*
+ * Jaguar and Bulldozer can and WILL have a broken RDRAND once the system wakes from
+ * suspend, so as Linux does, we disable it when CPU workarounds are applied.
+ */
+static cwa_classifier_e amd_rdrand_suspend_enabled(i386_cpu_info_t *cpuinfo)
+{
+	if (cpuinfo->cpuid_vendor_id == CPUID_VENDOR_ID_AMD) {
+		if (cpuinfo->cpuid_family == 0x15 || cpuinfo->cpuid_family == 0x16) {
+			return CWA_ON;
+		}
+	}
+
+	return CWA_OFF;
+}
+
+struct {
+	cwa_classifier_e (*enabled)(i386_cpu_info_t *cpuinfo);
+	void (*do_cwa)(i386_cpu_info_t *cpuinfo, boolean_t on_slave);
+} cpuid_wa_list[CPU_WA_MAX] = {
+	{&dummy_enabled, &dummy_apply},					/* !!! LEAVE EMPTY !!! */
+	{&intel_segchk_enabled, &intel_segchk_apply}, 	/* CPU_INTEL_SEGCHK */
+	{&intel_tsxfa_enabled, &intel_tsxfa_apply},		/* CPU_INTEL_TSXFA */
+	{&dummy_enabled, &dummy_apply},					/* CPU_AMD_RDRAND_SUSPEND */
+	{&dummy_enabled, &dummy_apply},					/* CPU_AMD_WAY_ACCESS_FILT */
+	{&dummy_enabled, &dummy_apply},					/* CPU_AMD_ZEN_ERRATUM_1076 */
+	{&dummy_enabled, &dummy_apply},					/* CPU_AMD_ZEN_ERRATUM_1054 */
+	{NULL, NULL},
+};
+
+static void
+do_cwas(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+{
+	for (int i = 0; i < CPU_WA_MAX; i++) {
+		cwa_classifier_e en = cpuid_wa_required(i);
+		if (en == CWA_ON || en == CWA_FORCE_ON) {
+			cpuid_wa_list[i].apply(cpuinfo, on_slave);
+		}
 	}
 }
 
@@ -2032,45 +2120,7 @@ cpuid_wa_required(cpu_wa_e wa)
 		return CWA_FORCE_OFF;
 	}
 
-	switch (wa) {
-	case CPU_INTEL_SEGCHK:
-		/* First, check to see if this CPU requires the workaround */
-		if ((info_p->cpuid_leaf7_extfeatures & CPUID_LEAF7_EXTFEATURE_ACAPMSR) != 0) {
-			/* We have ARCHCAP, so check it for either RDCL_NO or MDS_NO */
-			uint64_t archcap_msr = rdmsr64(MSR_IA32_ARCH_CAPABILITIES);
-			if ((archcap_msr & (MSR_IA32_ARCH_CAPABILITIES_RDCL_NO | MSR_IA32_ARCH_CAPABILITIES_MDS_NO)) != 0) {
-				/* Workaround not needed */
-				return CWA_OFF;
-			}
-		}
-
-		if ((info_p->cpuid_leaf7_extfeatures & CPUID_LEAF7_EXTFEATURE_MDCLEAR) != 0) {
-			return CWA_ON;
-		}
-
-		/*
-		 * If the CPU supports the ARCHCAP MSR and neither the RDCL_NO bit nor the MDS_NO
-		 * bit are set, OR the CPU does not support the ARCHCAP MSR and the CPU does
-		 * not enumerate the presence of the enhanced VERW instruction, report
-		 * that the workaround should not be enabled.
-		 */
-		break;
-
-	case CPU_INTEL_TSXFA:
-		/*
-		 * Otherwise, if the CPU supports both TSX(HLE) and FORCE_ABORT, return that
-		 * the workaround should be enabled.
-		 */
-		if ((info_p->cpuid_leaf7_extfeatures & CPUID_LEAF7_EXTFEATURE_TSXFA) != 0 &&
-		    (info_p->cpuid_leaf7_features & CPUID_LEAF7_FEATURE_RTM) != 0) {
-			return CWA_ON;
-		}
-		break;
-
-
-	default:
-		break;
-	}
+	cpuid_wa_list[i].enabled(cpuid_info());
 
 	return CWA_OFF;
 }

@@ -25,6 +25,10 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
+
+#ifndef _I386_UCODE_H_
+#define _I386_UCODE_H_
+
 /*
  *  ucode.h
  *
@@ -83,3 +87,5 @@ struct amd_ucupdate {
 
 extern int ucode_interface(uint64_t addr);
 extern void ucode_update_wake_and_apply_cpu_was(void);
+
+#endif

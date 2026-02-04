@@ -676,7 +676,12 @@ typedef struct {
 
 typedef enum {
 	CPU_INTEL_SEGCHK = 1,
-	CPU_INTEL_TSXFA = 2
+	CPU_INTEL_TSXFA = 2,
+	CPU_AMD_RDRAND_SUSPEND = 3, 	/* Jaguar and Bulldozer BIOSes have a tendency to not restore RDRAND on wake. */
+	CPU_AMD_WAY_ACCESS_FILT = 4,	/* Bulldozer can do some weird things. */
+	CPU_AMD_ZEN_ERRATUM_1076 = 5,
+	CPU_AMD_ZEN_ERRATUM_1054 = 6,
+	CPU_WA_MAX,
 } cpu_wa_e;
 
 typedef enum {
