@@ -832,10 +832,22 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 	 * and bracket this with the approved procedure for reading the
 	 * the microcode version number a.k.a. signature a.k.a. BIOS ID
 	 */
-	wrmsr64(MSR_IA32_BIOS_SIGN_ID, 0);
-	cpuid_fn(1, reg);
-	info_p->cpuid_microcode_version =
-	    (uint32_t) (rdmsr64(MSR_IA32_BIOS_SIGN_ID) >> 32);
+	if (info_p->cpuid_vendor_id == CPUID_VENDOR_ID_AMD) {
+		/*
+		 * AMD stores the ucode rev in bits 31:0
+		 */
+		info_p->cpuid_microcode_version =
+	    	(uint32_t) (rdmsr64(MSR_IA32_BIOS_SIGN_ID));
+	} else {
+		wrmsr64(MSR_IA32_BIOS_SIGN_ID, 0);
+		cpuid_fn(1, reg);
+		/*
+		 * Intel stores the ucode rev in bits 63:31
+		 */
+		info_p->cpuid_microcode_version =
+	    	(uint32_t) (rdmsr64(MSR_IA32_BIOS_SIGN_ID) >> 32);
+	}
+
 	info_p->cpuid_signature = reg[eax];
 	info_p->cpuid_stepping  = bitfield32(reg[eax], 3, 0);
 	info_p->cpuid_model     = bitfield32(reg[eax], 7, 4);
