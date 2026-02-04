@@ -32,4 +32,11 @@
 /* x86_64 kernels are always built SMP, even if only 1 CPU is active */
 #define __SMP__ 1
 
+/*
+ * SAMUEL ZORMEISTER:
+ *
+ * Fuck it. Enable AMP subsystems.
+ */
+#define __AMP__ 1
+
 #endif  /* _I386_SMP_H_ */

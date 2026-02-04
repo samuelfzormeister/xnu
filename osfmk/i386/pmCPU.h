@@ -37,7 +37,7 @@
  * This value should be changed each time that pmDispatch_t or pmCallBacks_t
  * changes.
  */
-#define PM_DISPATCH_VERSION     102
+#define PM_DISPATCH_VERSION     103
 
 /*
  * Dispatch table for functions that get installed when the power

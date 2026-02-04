@@ -195,7 +195,7 @@
 /*
  * If thread groups are needed for x86, set this to 1
  */
-#define CONFIG_THREAD_GROUPS 0
+#define CONFIG_THREAD_GROUPS 1
 
 #ifndef ASSEMBLER
 

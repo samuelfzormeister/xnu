@@ -285,12 +285,17 @@ static const char *cache_type_str[LCACHE_MAX] = {
 	"Lnone", "L1I", "L1D", "L2U", "L3U"
 };
 
-static cwa_classifier_e dummy_enabled(i386_cpu_info_t *cpuinfo)
+/*
+ * This will eventually become a large section by force of nature.
+ *
+ * Should this be migrated to somewhere else?
+ */
+static cwa_classifier_e dummy_enabled(i386_cpu_info_t *)
 {
 	return CWA_OFF;
 }
 
-static void dummy_apply(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+static void dummy_apply(i386_cpu_info_t *, boolean_t)
 {
 }
 
@@ -373,7 +378,7 @@ static cwa_classifier_e intel_tsxfa_enabled(i386_cpu_info_t *cpuinfo)
  * This workaround does not support being forcibly set (since an MSR must be
  * enumerated, lest we #GP when forced to access it.)
  */
-static void intel_tsxfa_apply(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
+static void intel_tsxfa_apply(i386_cpu_info_t *cpuinfo, boolean_t)
 {
 	/* This must be executed on all logical processors */
 	wrmsr64(MSR_IA32_TSX_FORCE_ABORT,
@@ -415,7 +420,7 @@ do_cwas(i386_cpu_info_t *cpuinfo, boolean_t on_slave)
 	for (int i = 0; i < CPU_WA_MAX; i++) {
 		cwa_classifier_e en = cpuid_wa_required(i);
 		if (en == CWA_ON || en == CWA_FORCE_ON) {
-			cpuid_wa_list[i].apply(cpuinfo, on_slave);
+			cpuid_wa_list[i].do_cwa(cpuinfo, on_slave);
 		}
 	}
 }
