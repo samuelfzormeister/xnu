@@ -2148,7 +2148,7 @@ x86_core_type_t
 cpuid_get_current_core_type(void)
 {
     i386_cpu_info_t *info_p = cpuid_info();
-    x86_core_type_t type = X86_CORE_TYPE_PERFORMANCE;
+    x86_core_type_t type = X86_CORE_TYPE_SMP;
     uint32_t reg[4] = {0, 0, 0, 0};
     uint32_t raw_type;
 

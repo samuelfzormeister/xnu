@@ -254,6 +254,10 @@ struct processor {
 	bool                    current_is_NO_SMT;         /* cached TH_SFLAG_NO_SMT of current thread */
 	bool                    current_is_bound;       /* current thread is bound to this processor */
 
+#if CONFIG_THREAD_GROUPS
+	struct thread_group    *current_thread_group;   /* thread_group of current thread */
+#endif
+
 	int                     starting_pri;           /* priority of current thread as it was when scheduled */
 	int                     cpu_id;                 /* platform numeric id */
 	cpu_quiescent_state_t   cpu_quiesce_state;
