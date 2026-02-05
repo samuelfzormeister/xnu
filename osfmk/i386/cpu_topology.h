@@ -73,24 +73,28 @@ struct mca_state;
 /*
  * Define the types of cores that can be found in an x86 system.
  *
+ * X86_CORE_TYPE_SMP
+ * The default core type for x86.
+ *
  * X86_CORE_TYPE_PERFORMANCE
- * This is a (regular) performance core.
- * Additionally, this serves as the default value for non-HSA systems.
+ * A performance core, usually the mainstream architecture, eg: Alder/Raptor Lake for Intel.
  *
  * TODO:
  * The scheduler can probably be looked over with the newly collected data,
  * taking advantage of the groups of cores, eg: the AMP scheduler for ARM + thread groups.
  *
  * X86_CORE_TYPE_EFFICIENCY
- * An efficiency core, as seen in Intel products since 2021.
+ * An efficiency core, as seen in Intel products since 2021. Example: Gracemont/Skymont
  *
  * X86_CORE_TYPE_EFFICIENCY_LP
  * A low-power efficiency core, as seen in Arrow Lake and Meteor Lake.
  */
  typedef enum {
-     X86_CORE_TYPE_PERFORMANCE   = 0,
-     X86_CORE_TYPE_EFFICIENCY    = 1,
-     X86_CORE_TYPE_EFFICIENCY_LP = 2
+	X86_CORE_TYPE_SMP = 0,
+
+	X86_CORE_TYPE_PERFORMANCE   = 1,
+	X86_CORE_TYPE_EFFICIENCY    = 2,
+	X86_CORE_TYPE_EFFICIENCY_LP = 3
  } x86_core_type_t;
 
 /*

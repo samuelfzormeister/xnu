@@ -1154,3 +1154,23 @@ ml_get_booter_memory_size(void)
 {
 	return 0;
 }
+
+/*
+ * Use topology gathered by osfmk to determine boot cpu cluster type.
+ */
+cluster_type_t
+ml_get_boot_cluster(void)
+{
+	cpu_data_t *data_p = cpu_datap(0);
+
+	switch (data_p->cpu_core_type) {
+		case X86_CORE_TYPE_PERFORMANCE:
+			return CLUSTER_TYPE_P;
+		case X86_CORE_TYPE_EFFICIENCY:
+			return CLUSTER_TYPE_E;
+		case X86_CORE_TYPE_EFFICIENCY_LP:
+			return CLUSTER_TYPE_E;
+		default:
+			return CLUSTER_TYPE_SMP;
+	}
+}

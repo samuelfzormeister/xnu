@@ -388,6 +388,14 @@ void ml_gpu_stat_update(uint64_t);
 uint64_t ml_gpu_stat(thread_t);
 boolean_t ml_recent_wake(void);
 
+typedef enum {
+	CLUSTER_TYPE_SMP,
+	CLUSTER_TYPE_P,
+	CLUSTER_TYPE_E,
+} cluster_type_t;
+
+cluster_type_t ml_get_boot_cluster(void);
+
 #define ALL_CORES_RECOMMENDED   (~(uint64_t)0)
 
 extern void sched_usercontrol_update_recommended_cores(uint64_t recommended_cores);
