@@ -2125,7 +2125,7 @@ cpuid_wa_required(cpu_wa_e wa)
 		return CWA_FORCE_OFF;
 	}
 
-	cpuid_wa_list[i].enabled(cpuid_info());
+	cpuid_wa_list[wa].enabled(cpuid_info());
 
 	return CWA_OFF;
 }
