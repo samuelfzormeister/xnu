@@ -66,9 +66,11 @@ struct ch_event_result {
 	uint32_t rx_data;
 };
 
-static LCK_GRP_DECLARE(channel_lock_group, "sk_ch_lock");
-static LCK_GRP_DECLARE(channel_kn_lock_group, "sk_ch_kn_lock");
-LCK_ATTR_DECLARE(channel_lock_attr, 0, 0);
+// static LCK_GRP_DECLARE(channel_lock_group, "sk_ch_lock");
+// static LCK_GRP_DECLARE(channel_kn_lock_group, "sk_ch_kn_lock");
+static lck_grp_t *channel_kn_lock_group;
+static lck_grp_t *channel_lock_group;
+lck_attr_t *channel_lock_attr;
 
 static void csi_selrecord(struct ch_selinfo *, struct proc *, void *);
 static void csi_selwakeup(struct ch_selinfo *, boolean_t, boolean_t, uint32_t);
@@ -92,7 +94,7 @@ static int ch_set_lowat_thresh(struct kern_channel *, enum txrx,
     struct sockopt *);
 static int ch_get_lowat_thresh(struct kern_channel *, enum txrx,
     struct sockopt *);
-static struct kern_channel *ch_alloc(zalloc_flags_t);
+static struct kern_channel *ch_alloc(boolean_t);
 static void ch_free(struct kern_channel *);
 static int ch_configure_interface_advisory_event(struct kern_channel *ch,
     struct sockopt *sopt);
@@ -166,6 +168,11 @@ static ZONE_DECLARE(ch_zone, SKMEM_ZONE_PREFIX ".ch",
 
 static ZONE_DECLARE(ch_info_zone, SKMEM_ZONE_PREFIX ".ch.info",
     sizeof(struct ch_info), ZC_ZFREE_CLEARMEM);
+
+#define MAX_CHANNELS 128
+
+static zone_t ch_zone;
+static zone_t ch_info_zone;
 
 static int __ch_inited = 0;
 
@@ -251,7 +258,7 @@ csi_init(struct ch_selinfo *csi, boolean_t mitigation, uint64_t mit_ival)
 		csi->csi_eff_interval = 0;
 		csi->csi_tcall = NULL;
 	}
-	lck_mtx_init(&csi->csi_lock, &channel_kn_lock_group, &channel_lock_attr);
+	lck_mtx_init(&csi->csi_lock, channel_kn_lock_group, channel_lock_attr);
 	klist_init(&csi->csi_si.si_note);
 }
 
@@ -286,7 +293,7 @@ csi_destroy(struct ch_selinfo *csi)
 
 		selthreadclear(&csi->csi_si);
 		/* now we don't need the mutex anymore */
-		lck_mtx_destroy(&csi->csi_lock, &channel_kn_lock_group);
+		lck_mtx_destroy(&csi->csi_lock, channel_kn_lock_group);
 	}
 }
 

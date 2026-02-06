@@ -68,6 +68,8 @@
 #define _NET_CLASSQ_CLASSQ_H_
 
 #ifdef PRIVATE
+#include <sys/types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

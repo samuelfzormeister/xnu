@@ -873,6 +873,9 @@ struct udpstat_local;
 #if PF
 struct pfi_kif;
 #endif /* PF */
+#if SKYWALK
+struct nexus_netif_adapter;
+#endif /* SKYWALK */
 
 /* we use TAILQs so that the order of instantiation is preserved in the list */
 TAILQ_HEAD(ifnethead, ifnet);
@@ -935,6 +938,31 @@ extern boolean_t intcoproc_unrestricted;
 
 RB_HEAD(ll_reach_tree, if_llreach);     /* define struct ll_reach_tree */
 
+#if SKYWALK
+struct nexus_ifnet_ops {
+	void (*ni_finalize)(struct nexus_netif_adapter *, struct ifnet *);
+	void (*ni_reap)(struct nexus_netif_adapter *, struct ifnet *,
+	    uint32_t);
+	errno_t (*ni_dequeue)(struct nexus_netif_adapter *, uint32_t,
+	    uint32_t, uint32_t, classq_pkt_t *, classq_pkt_t *, uint32_t *,
+	    uint32_t *, boolean_t, errno_t);
+	errno_t (*ni_get_len)(struct nexus_netif_adapter *, uint32_t,
+	    uint32_t *, uint32_t *, errno_t);
+};
+typedef struct {
+	uuid_t          if_nif_provider;
+	uuid_t          if_nif_instance;
+	uuid_t          if_nif_attach;
+} if_nexus_netif, *if_nexus_netif_t;
+
+typedef struct {
+	uuid_t          if_fsw_provider;
+	uuid_t          if_fsw_instance;
+	uuid_t          if_fsw_device;
+	uuid_t          if_fsw_host;
+	uint32_t        if_fsw_ipaddr_gencnt;
+} if_nexus_flowswitch, *if_nexus_flowswitch_t;
+#endif /* SKYWALK */
 
 typedef errno_t (*dlil_input_func)(ifnet_t ifp, mbuf_t m_head,
     mbuf_t m_tail, const struct ifnet_stat_increment_param *s,
@@ -1130,6 +1158,39 @@ struct ifnet {
 	struct pfi_kif          *if_pf_kif;
 #endif /* PF */
 
+#if SKYWALK
+	struct nexus_ifnet_ops *if_na_ops;
+	struct nexus_netif_adapter *if_na;
+
+	/* compat netif attachment */
+	if_nexus_netif          if_nx_netif;
+
+	/* flowswitch attachment */
+	if_nexus_flowswitch     if_nx_flowswitch;
+
+	/* headroom space to be reserved in tx packets */
+	uint16_t                if_tx_headroom;
+
+	/* trailer space to be reserved in tx packets */
+	uint16_t                if_tx_trailer;
+
+	/*
+	 * mitigation interval in microseconds for the rx interrupt mitigation
+	 * logic while operating in the high throughput mode.
+	 */
+	uint32_t                if_rx_mit_ival;
+
+	ifnet_start_func        if_save_start;
+	ifnet_output_func       if_save_output;
+
+	/*
+	 * Number of threads waiting for the start callback to be finished;
+	 * access is protected by if_start_lock; also serves as wait channel.
+	 */
+	uint32_t                if_start_waiters;
+#endif /* SKYWALK */
+
+
 	decl_lck_mtx_data(, if_cached_route_lock);
 	u_int32_t               if_fwd_cacheok;
 	struct route            if_fwd_route;   /* cached forwarding route */
@@ -1206,11 +1267,20 @@ struct ifnet {
 	struct if_tcp_ecn_stat *if_ipv4_stat;
 	struct if_tcp_ecn_stat *if_ipv6_stat;
 
+#if SKYWALK
+	/* Keeps track of local ports bound to this interface
+	 * Protected by the global lock in skywalk/netns/netns.c */
+	SLIST_HEAD(, ns_token) if_netns_tokens;
+#endif /* SKYWALK */
+
 	struct if_lim_perf_stat if_lim_stat;
 
 	uint32_t        if_tcp_kao_max;
 	uint32_t        if_tcp_kao_cnt;
 
+#if SKYWALK
+	struct netem    *if_input_netem;
+#endif /* SKYWALK */
 	struct netem    *if_output_netem;
 };
 
@@ -2023,6 +2093,26 @@ __private_extern__ int if_add_netagent_locked(struct ifnet *, uuid_t);
 __private_extern__ int if_delete_netagent(struct ifnet *, uuid_t);
 __private_extern__ boolean_t if_check_netagent(struct ifnet *, uuid_t);
 
+#if SKYWALK
+extern unsigned int if_enable_fsw_ip_netagent;
+static inline boolean_t
+if_is_fsw_ip_netagent_enabled(void)
+{
+	return if_enable_fsw_ip_netagent != 0;
+}
+extern unsigned int if_enable_fsw_transport_netagent;
+static inline boolean_t
+if_is_fsw_transport_netagent_enabled(void)
+{
+	return if_enable_fsw_transport_netagent != 0;
+}
+static inline boolean_t
+if_is_fsw_netagent_enabled(void)
+{
+	return if_is_fsw_transport_netagent_enabled() ||
+	       if_is_fsw_ip_netagent_enabled();
+}
+#endif /* SKYWALK */
 
 extern int if_set_qosmarking_mode(struct ifnet *, u_int32_t);
 __private_extern__ uint32_t ifnet_mbuf_packetpreamblelen(struct ifnet *);
@@ -2042,6 +2132,20 @@ __private_extern__ errno_t ifnet_enqueue_mbuf(struct ifnet *, struct mbuf *,
     boolean_t, boolean_t *);
 __private_extern__ int ifnet_enqueue_netem(void *handle, pktsched_pkt_t *pkts,
     uint32_t n_pkts);
+#if SKYWALK
+struct __kern_packet;
+extern errno_t ifnet_enqueue_pkt(struct ifnet *,
+    struct __kern_packet *, boolean_t, boolean_t *);
+extern errno_t ifnet_enqueue_ifclassq(struct ifnet *, classq_pkt_t *, boolean_t, boolean_t *);
+extern errno_t ifnet_set_output_handler(struct ifnet *, ifnet_output_func);
+extern void ifnet_reset_output_handler(struct ifnet *);
+extern errno_t ifnet_set_start_handler(struct ifnet *, ifnet_start_func);
+extern void ifnet_reset_start_handler(struct ifnet *);
+
+#define SK_NXS_MS_IF_ADDR_GENCNT_INC(ifp)        \
+    atomic_add_32(&(ifp)->if_nx_flowswitch.if_fsw_ipaddr_gencnt, 1);
+#endif /* SKYWALK */
+
 
 extern int if_low_power_verbose;
 extern int if_low_power_restricted;

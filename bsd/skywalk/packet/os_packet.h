@@ -204,8 +204,6 @@ typedef uint32_t packet_trace_id_t;
  * TODO: adi@apple.com -- these are temporary and should be removed later.
  */
 #define OS_PACKET_HAS_CHECKSUM_API      1
-#define OS_PACKET_HAS_SEGMENT_COUNT     1
-#define OS_PACKET_HAS_TRACING_API       1
 
 /*
  * Valid values for pkt_aggr_type.
@@ -324,8 +322,6 @@ extern int os_packet_set_transport_last_packet(const packet_t);
 extern int os_packet_set_service_class(const packet_t,
     const packet_svc_class_t);
 extern packet_svc_class_t os_packet_get_service_class(const packet_t);
-extern int os_packet_set_compression_generation_count(const packet_t, const uint32_t);
-extern uint32_t os_packet_get_compression_generation_count(const packet_t);
 extern int os_packet_set_traffic_class(const packet_t, packet_traffic_class_t);
 extern packet_traffic_class_t os_packet_get_traffic_class(const packet_t);
 extern int os_packet_set_inet_checksum(const packet_t,
@@ -338,6 +334,7 @@ extern void os_packet_set_group_end(const packet_t);
 extern boolean_t os_packet_get_group_end(const packet_t);
 extern int os_packet_set_expire_time(const packet_t, const uint64_t);
 extern int os_packet_get_expire_time(const packet_t, uint64_t *);
+extern int os_packet_get_token(const packet_t, void *, uint16_t *);
 extern int os_packet_set_token(const packet_t, const void *, const uint16_t);
 extern int os_packet_get_packetid(const packet_t, packet_id_t *);
 extern int os_packet_set_packetid(const packet_t, packet_id_t *);
@@ -346,13 +343,7 @@ extern int os_packet_set_vlan_tag(const packet_t, const uint16_t,
 extern int os_packet_get_vlan_tag(const packet_t, uint16_t *, boolean_t *);
 extern uint16_t os_packet_get_vlan_id(const uint16_t);
 extern uint8_t os_packet_get_vlan_priority(const uint16_t);
-#define HAS_OS_PACKET_GET_WAKE_FLAG 1
-extern boolean_t os_packet_get_wake_flag(const packet_t);
-#define HAS_OS_PACKET_KEEP_ALIVE 1
-extern boolean_t os_packet_get_keep_alive(const packet_t);
-extern void os_packet_set_keep_alive(const packet_t, const boolean_t);
 extern boolean_t os_packet_get_truncated(const packet_t);
-extern uint8_t os_packet_get_aggregation_type(const packet_t ph);
 
 /*
  * Quantum & Packets.
@@ -363,18 +354,7 @@ extern void os_packet_clear_flow_uuid(const packet_t);
 extern uint32_t os_packet_get_data_length(const packet_t);
 extern uint32_t os_packet_get_buflet_count(const packet_t);
 extern buflet_t os_packet_get_next_buflet(const packet_t, const buflet_t);
-extern uint32_t os_packet_get_segment_count(const packet_t ph);
 extern int os_packet_finalize(const packet_t);
-extern int os_packet_add_buflet(const packet_t ph, const buflet_t bprev,
-    const buflet_t bnew);
-/* increment use count on packet */
-extern int os_packet_increment_use_count(const packet_t ph);
-/* decrement use count on packet and retrieve new value  */
-extern int os_packet_decrement_use_count(const packet_t ph, uint16_t *use_cnt);
-
-extern packet_trace_id_t os_packet_get_trace_id(const packet_t ph);
-extern void os_packet_set_trace_id(const packet_t ph, packet_trace_id_t);
-extern void os_packet_trace_event(const packet_t ph, uint32_t);
 
 /*
  * Misc.
@@ -391,8 +371,6 @@ extern uint16_t os_buflet_get_data_offset(const buflet_t);
 extern int os_buflet_set_data_length(const buflet_t, const uint16_t);
 extern uint16_t os_buflet_get_data_length(const buflet_t);
 extern void *os_buflet_get_object_address(const buflet_t);
-extern uint32_t os_buflet_get_object_limit(const buflet_t);
-extern void *os_buflet_get_data_address(const buflet_t);
 extern uint16_t os_buflet_get_data_limit(const buflet_t);
 #endif  /* (!_POSIX_C_SOURCE || _DARWIN_C_SOURCE) */
 #else /* KERNEL */
@@ -614,8 +592,6 @@ extern kern_packet_svc_class_t kern_packet_get_service_class(
 	const kern_packet_t);
 extern errno_t kern_packet_get_service_class_index(
 	const kern_packet_svc_class_t, uint32_t *);
-extern boolean_t kern_packet_is_high_priority(
-	const kern_packet_t);
 extern errno_t kern_packet_set_traffic_class(const kern_packet_t,
     kern_packet_traffic_class_t);
 extern kern_packet_traffic_class_t kern_packet_get_traffic_class(
@@ -651,8 +627,6 @@ extern errno_t kern_packet_get_vlan_tag(const kern_packet_t, uint16_t *,
     boolean_t *);
 extern uint16_t kern_packet_get_vlan_id(const uint16_t);
 extern uint8_t kern_packet_get_vlan_priority(const uint16_t);
-extern void kern_packet_set_wake_flag(const kern_packet_t);
-extern boolean_t kern_packet_get_wake_flag(const kern_packet_t);
 
 /*
  * Quantum & Packets.
@@ -670,19 +644,8 @@ extern errno_t kern_packet_set_buflet_count(const kern_packet_t, uint32_t);
 extern kern_buflet_t kern_packet_get_next_buflet(const kern_packet_t,
     const kern_buflet_t);
 extern errno_t kern_packet_finalize(const kern_packet_t);
-extern errno_t kern_packet_clone(const kern_packet_t, kern_packet_t *,
-    kern_packet_copy_mode_t);
-extern errno_t kern_packet_clone_nosleep(const kern_packet_t, kern_packet_t *,
-    kern_packet_copy_mode_t);
-extern errno_t kern_packet_add_buflet(const kern_packet_t ph,
-    const kern_buflet_t bprev, const kern_buflet_t bnew);
-extern void kern_packet_append(const kern_packet_t, const kern_packet_t);
-extern kern_packet_t kern_packet_get_next(const kern_packet_t);
-extern void kern_packet_set_next(const kern_packet_t, const kern_packet_t);
-extern void kern_packet_set_chain_counts(const kern_packet_t, uint32_t,
-    uint32_t);
-extern void kern_packet_get_chain_counts(const kern_packet_t, uint32_t *,
-    uint32_t *);
+extern kern_packet_t kern_packet_clone(const kern_packet_t, uint32_t);
+
 
 /*
  * Misc.
@@ -690,26 +653,23 @@ extern void kern_packet_get_chain_counts(const kern_packet_t, uint32_t *,
 extern uint32_t kern_inet_checksum(const void *, uint32_t, uint32_t);
 extern uint32_t kern_copy_and_inet_checksum(const void *, void *,
     uint32_t, uint32_t);
-extern void kern_packet_set_trace_id(const kern_packet_t, packet_trace_id_t);
-extern packet_trace_id_t kern_packet_get_trace_id(const kern_packet_t);
-extern void kern_packet_trace_event(const kern_packet_t, uint32_t);
-extern errno_t kern_packet_copy_bytes(const kern_packet_t, size_t, size_t,
-    void*);
 
 /*
  * Buflets.
  */
+extern errno_t kern_buflet_attach_buffer(const kern_buflet_t, mach_vm_address_t);
+extern errno_t kern_buflet_attach_buffer_with_segment_info(const kern_buflet_t,
+    kern_segment_t, kern_obj_idx_seg_t);
 extern errno_t kern_buflet_set_data_address(const kern_buflet_t, const void *);
 extern void *kern_buflet_get_data_address(const kern_buflet_t);
 extern errno_t kern_buflet_set_data_offset(const kern_buflet_t, const uint16_t);
 extern uint16_t kern_buflet_get_data_offset(const kern_buflet_t);
 extern errno_t kern_buflet_set_data_length(const kern_buflet_t, const uint16_t);
 extern uint16_t kern_buflet_get_data_length(const kern_buflet_t);
+extern mach_vm_offset_t kern_buflet_get_object_offset(const kern_buflet_t);
 extern void *kern_buflet_get_object_address(const kern_buflet_t);
-extern uint32_t kern_buflet_get_object_limit(const kern_buflet_t);
 extern kern_segment_t kern_buflet_get_object_segment(const kern_buflet_t,
     kern_obj_idx_seg_t *);
-extern errno_t kern_buflet_set_data_limit(const kern_buflet_t, const uint16_t);
 extern uint16_t kern_buflet_get_data_limit(const kern_buflet_t);
 
 /*

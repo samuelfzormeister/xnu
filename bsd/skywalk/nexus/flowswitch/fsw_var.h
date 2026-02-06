@@ -73,10 +73,19 @@ extern kern_allocation_name_t skmem_tag_fsw_frag_mgr;
 
 __BEGIN_DECLS
 
+struct fsw_ft_pkt {
+    struct __kern_packet    *ft_pkt_ptr;
+    char                    *ft_pkt_buf;
+    uint16_t                ft_pkt_flags;
+    uint16_t                ft_pkt_len;
+    uint16_t                ft_pkt_next;
+    uint16_t                ft_pkt_nfrags;
+};
+
 // generic
 extern void fsw_init(void);
 extern void fsw_uninit(void);
-extern struct nx_flowswitch * fsw_alloc(zalloc_flags_t);
+extern struct nx_flowswitch * fsw_alloc(boolean_t);
 extern void fsw_free(struct nx_flowswitch *fsw);
 extern int fsw_grow(struct nx_flowswitch *fsw, uint32_t grow);
 extern int fsw_port_find(struct nx_flowswitch *fsw, nexus_port_t first,
@@ -141,7 +150,7 @@ extern void fsw_classq_setup(struct nx_flowswitch *fsw,
 extern void fsw_classq_teardown(struct nx_flowswitch *fsw,
     struct nexus_adapter *hostna);
 extern struct mbuf * fsw_classq_kpkt_to_mbuf(struct nx_flowswitch *fsw,
-    struct __kern_packet *pkt);
+    struct fsw_ft_pkt *pkt, proc_t proc);
 
 // routing related
 extern int fsw_generic_resolve(struct nx_flowswitch *fsw, struct flow_route *fr,
@@ -208,10 +217,10 @@ extern void fsw_classq_setup(struct nx_flowswitch *fsw,
 extern void fsw_classq_teardown(struct nx_flowswitch *fsw,
     struct nexus_adapter *hostna);
 extern void fsw_qos_mark(struct nx_flowswitch *fsw, struct flow_entry *fe,
-    struct __kern_packet *pkt);
+    struct fsw_ft_pkt *pkt);
 extern boolean_t fsw_qos_default_restricted(void);
 extern struct mbuf * fsw_classq_kpkt_to_mbuf(struct nx_flowswitch *fsw,
-    struct __kern_packet *pkt);
+    struct fsw_ft_pkt *pkt, proc_t proc);
 extern sa_family_t fsw_ip_demux(struct nx_flowswitch *, struct __kern_packet *);
 
 // fragment reassembly related

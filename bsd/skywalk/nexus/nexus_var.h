@@ -59,6 +59,7 @@
 #ifdef BSD_KERNEL_PRIVATE
 #include <skywalk/core/skywalk_var.h>
 #include <skywalk/os_nexus_private.h>
+#include <skywalk/mem/skmem_region_var.h>
 
 struct chreq;
 struct nxdom;
@@ -503,7 +504,7 @@ extern int nxprov_close(struct kern_nexus_provider *, boolean_t);
 extern int nxprov_destroy(struct nxctl *, const uuid_t);
 extern void nxprov_retain(struct kern_nexus_provider *);
 extern int nxprov_release(struct kern_nexus_provider *);
-extern struct nxprov_params *nxprov_params_alloc(zalloc_flags_t);
+extern struct nxprov_params *nxprov_params_alloc(boolean_t can_block);
 extern void nxprov_params_free(struct nxprov_params *);
 
 struct nxprov_adjusted_params {
@@ -553,7 +554,7 @@ extern int nxdom_prov_validate_params(struct kern_nexus_domain_provider *,
     const struct nxprov_reg *, struct nxprov_params *,
     struct skmem_region_params[SKMEM_REGIONS], const uint32_t);
 
-extern struct nxbind *nxb_alloc(zalloc_flags_t);
+extern struct nxbind *nxb_alloc(boolean_t can_block);
 extern void nxb_free(struct nxbind *);
 extern boolean_t nxb_is_equal(struct nxbind *, struct nxbind *);
 extern void nxb_move(struct nxbind *, struct nxbind *);
@@ -612,45 +613,5 @@ nx_tx_doorbell(struct __kern_channel_ring *kring, boolean_t async)
 	    kring, (async ? KERN_NEXUS_TXDOORBELLF_ASYNC_REFILL: 0));
 }
 
-__attribute__((always_inline))
-static inline int
-nx_rx_sync_packets(struct __kern_channel_ring *kring, uint64_t packets[],
-    uint32_t *count)
-{
-	struct kern_nexus_provider *nxprov = NX_PROV(KRNA(kring)->na_nx);
-
-	ASSERT(kring->ckr_tx == NR_RX);
-	if (nxprov->nxprov_ext.nxpi_rx_sync_packets != NULL) {
-		return nxprov->nxprov_ext.nxpi_rx_sync_packets(nxprov,
-		           KRNA(kring)->na_nx, kring, packets, count, 0);
-	} else {
-		return 0;
-	}
-}
-
-__attribute__((always_inline))
-static inline boolean_t
-nx_has_rx_sync_packets(struct __kern_channel_ring *kring)
-{
-	struct kern_nexus_provider *nxprov = NX_PROV(KRNA(kring)->na_nx);
-
-	ASSERT(kring->ckr_tx == NR_RX);
-	return nxprov->nxprov_ext.nxpi_rx_sync_packets != NULL;
-}
-
-__attribute__((always_inline))
-static __inline__ errno_t
-nx_tx_qset_notify(struct kern_nexus *nx, struct netif_qset *qset)
-{
-	struct kern_nexus_provider *nxprov = NX_PROV(nx);
-	sk_protect_t protect;
-	errno_t err;
-
-	ASSERT(nxprov->nxprov_netif_ext.nxnpi_tx_qset_notify != NULL);
-	protect = sk_tx_notify_protect();
-	err = nxprov->nxprov_netif_ext.nxnpi_tx_qset_notify(nxprov, nx, qset, 0);
-	sk_tx_notify_unprotect(protect);
-	return err;
-}
 #endif /* BSD_KERNEL_PRIVATE */
 #endif /* _SKYWALK_NEXUS_NEXUSVAR_H_ */

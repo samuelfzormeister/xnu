@@ -122,6 +122,7 @@ SYSCTL_PROC(_kern_skywalk_stats, OID_AUTO, arena,
     0, 0, skmem_arena_mib_get_sysctl, "S,sk_stats_arena",
     "Skywalk arena statistics");
 
+static lck_grp_attr_t *skmem_arena_lock_grp;
 static LCK_GRP_DECLARE(skmem_arena_lock_grp, "skmem_arena");
 static LCK_MTX_DECLARE(skmem_arena_lock, &skmem_arena_lock_grp);
 

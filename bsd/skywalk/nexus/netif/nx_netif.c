@@ -280,7 +280,7 @@ struct nexus_ifnet_ops na_netif_ops = {
 #define NX_NETIF_DOORBELL_MAX_DEQUEUE    64
 uint32_t nx_netif_doorbell_max_dequeue = NX_NETIF_DOORBELL_MAX_DEQUEUE;
 
-SYSCTL_EXTENSIBLE_NODE(_kern_skywalk, OID_AUTO, netif,
+SYSCTL_NODE(_kern_skywalk, OID_AUTO, netif,
     CTLFLAG_RW | CTLFLAG_LOCKED, 0, "Skywalk network interface");
 #if (DEVELOPMENT || DEBUG)
 SYSCTL_STRING(_kern_skywalk_netif, OID_AUTO, sk_ll_prefix,
@@ -1587,33 +1587,6 @@ nx_netif_ctl(struct kern_nexus *nx, nxcfg_cmd_t nc_cmd, void *data,
 	return error;
 }
 
-static void
-nx_netif_llink_notify(struct kern_nexus *nx, struct netif_llink *llink,
-    uint32_t flags)
-{
-#pragma unused(flags)
-	struct netif_qset *qset;
-
-	SLIST_FOREACH(qset, &llink->nll_qset_list, nqs_list) {
-		(void) nx_tx_qset_notify(nx, qset->nqs_ctx);
-	}
-}
-
-static void
-nx_netif_llink_notify_all(struct kern_nexus *nx, uint32_t flags)
-{
-	struct nx_netif *nif;
-	struct netif_llink *llink;
-
-	nif = NX_NETIF_PRIVATE(nx);
-
-	lck_rw_lock_shared(&nif->nif_llink_lock);
-	STAILQ_FOREACH(llink, &nif->nif_llink_list, nll_link) {
-		nx_netif_llink_notify(nx, llink, flags);
-	}
-	lck_rw_unlock_shared(&nif->nif_llink_lock);
-}
-
 /*
  * if_start() callback for native Skywalk interfaces, registered
  * at ifnet_allocate_extended() time, and invoked by the ifnet
@@ -1637,18 +1610,14 @@ nx_netif_doorbell_internal(struct ifnet *ifp, uint32_t flags)
 		/* update our work timestamp */
 		hwna->na_work_ts = _net_uptime;
 
-		if (NX_LLINK_PROV(nx)) {
-			nx_netif_llink_notify_all(nx, flags);
-		} else {
-			struct __kern_channel_ring *kring;
+		struct __kern_channel_ring *kring;
 
-			/* for doorbell purposes, use TX ring 0 */
-			kring = &hwna->na_tx_rings[0];
+		/* for doorbell purposes, use TX ring 0 */
+		kring = &hwna->na_tx_rings[0];
 
-			/* Issue a synchronous TX doorbell on the netif device ring */
-			kring->ckr_na_sync(kring, PROC_NULL,
-			    (NA_SYNCF_NETIF_DOORBELL | NA_SYNCF_NETIF_IFSTART));
-		}
+		/* Issue a synchronous TX doorbell on the netif device ring */
+		kring->ckr_na_sync(kring, PROC_NULL,
+			(NA_SYNCF_NETIF_DOORBELL | NA_SYNCF_NETIF_IFSTART));
 	} else {
 		struct netif_stats *nifs =
 		    &NX_NETIF_PRIVATE(hwna->na_nx)->nif_stats;
@@ -2583,7 +2552,6 @@ na_netif_finalize(struct nexus_netif_adapter *nifna, struct ifnet *ifp)
 	ifnet_incr_iorefcnt(hostna->na_ifp);
 
 	nx_netif_flags_init(nif);
-	nx_netif_llink_init(nif);
 	nx_netif_filter_init(nif);
 	nx_netif_flow_init(nif);
 	nx_netif_capabilities_init(nif);

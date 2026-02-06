@@ -58,21 +58,15 @@ struct __kern_buflet {
 } __attribute((packed));
 
 
-#define KBUF_CTOR(_kbuf, _baddr, _bidxreg, _bc, _pp) do {               \
+#define KBUF_CTOR(_kbuf, _baddr, _bidxreg, _pp) do {               \
 	_CASSERT(sizeof ((_kbuf)->buf_addr) == sizeof (mach_vm_address_t));\
 	/* kernel variant (deconst) */                                  \
 	BUF_CTOR(_kbuf, _baddr, _bidxreg, (_pp)->pp_buflet_size, 0, 0,  \
-	    (_kbuf)->buf_nbft_addr, (_kbuf)->buf_nbft_idx, (_kbuf)->buf_flag);\
-	*(struct skmem_bufctl **)(uintptr_t)&(_kbuf)->buf_ctl = (_bc);  \
-	/* this may be called to initialize unused buflets */           \
-	if (__probable((_bc) != NULL)) {                                \
-	        skmem_bufctl_use(_bc);                                  \
-	}                                                               \
+	    (_kbuf)->buf_flag);\
 	/* no need to construct user variant as it is done in externalize */ \
 } while (0)
 
 #define KBUF_INIT(_kbuf) do {                                           \
-	ASSERT((_kbuf)->buf_ctl != NULL);                               \
 	ASSERT((_kbuf)->buf_addr != 0);                                 \
 	ASSERT((_kbuf)->buf_dlim != 0);                                 \
 	/* kernel variant (deconst) */                                  \
@@ -82,9 +76,7 @@ struct __kern_buflet {
 /* initialize struct __user_buflet from struct __kern_buflet */
 #define UBUF_INIT(_kbuf, _ubuf) do {                                    \
 	BUF_CTOR(_ubuf, 0, (_kbuf)->buf_idx, (_kbuf)->buf_dlim,         \
-	    (_kbuf)->buf_dlen, (_kbuf)->buf_doff, (_kbuf)->buf_nbft_addr,\
-	    (_kbuf)->buf_nbft_idx, (_kbuf)->buf_flag);                  \
-	BUF_BFT_IDX_REG(_ubuf, (_kbuf)->buf_bft_idx_reg);              \
+	    (_kbuf)->buf_dlen, (_kbuf)->buf_doff, (_kbuf)->buf_flag);   \
 } while (0)
 
 #define KBUF_EXTERNALIZE(_kbuf, _ubuf, _pp) do {                       \
@@ -93,7 +85,6 @@ struct __kern_buflet {
 	/* For now, user-facing pool does not support shared */        \
 	/* buffer, since otherwise the ubuf and kbuf buffer  */        \
 	/* indices would not match.  Assert this is the case.*/        \
-	ASSERT((_kbuf)->buf_addr == (mach_vm_address_t)(_kbuf)->buf_objaddr);\
 	/* Initialize user buflet metadata from kernel buflet */       \
 	UBUF_INIT(_kbuf, _ubuf);                                       \
 } while (0)
@@ -108,12 +99,6 @@ struct __kern_buflet {
 } while (0)
 
 #define KBUF_DTOR(_kbuf, _usecnt) do {                                  \
-	if (__probable((_kbuf)->buf_ctl != NULL)) {                     \
-	        (_usecnt) = skmem_bufctl_unuse(                         \
-	            __DECONST(struct skmem_bufctl *, (_kbuf)->buf_ctl));\
-	        *(struct skmem_bufctl **)                               \
-	            (uintptr_t)&(_kbuf)->buf_ctl = NULL;                \
-	}                                                               \
 	BUF_BADDR(_kbuf, 0);                                            \
 	BUF_BIDX(_kbuf, OBJ_IDX_NONE);                                  \
 } while (0)
@@ -129,13 +114,6 @@ struct __kern_buflet {
 	/* copy everything in the kernel buflet */                      \
 	sk_copy64_40((uint64_t *)(void *)(_skb), (uint64_t *)(void *)(_dkb));\
 	((uint32_t *)(void *)(_dkb))[10] = ((uint32_t *)(void *)(_skb))[10];\
-	ASSERT((_dkb)->buf_ctl == (_skb)->buf_ctl);                     \
-	_CASSERT(sizeof((_dkb)->buf_flag) == sizeof(uint16_t));         \
-	*__DECONST(uint16_t *, &(_dkb)->buf_flag) &= ~BUFLET_FLAG_EXTERNAL;\
-	if (__probable((_dkb)->buf_ctl != NULL)) {                      \
-	        skmem_bufctl_use(__DECONST(struct skmem_bufctl *,       \
-	            (_dkb)->buf_ctl));                                  \
-	}                                                               \
 } while (0)
 
 /*
@@ -153,9 +131,9 @@ struct __kern_quantum {
 	SLIST_ENTRY(__kern_quantum)     qum_upp_link;
 	const struct kern_pbufpool      *qum_pp;
 	const struct __user_quantum     *qum_user;
+	pid_t                           qum_pid;
 	const struct __kern_slot_desc   *qum_ksd;
 	struct __kern_buflet            qum_buf[1];     /* 1 buflet */
-	pid_t                           qum_pid;
 } __attribute((aligned(sizeof(uint64_t))));
 
 #define KQUM_CTOR(_kqum, _midx, _uqum, _pp, _qflags) do {               \
@@ -221,9 +199,9 @@ _UUID_MATCH(uuid_t u1, uuid_t u2)
 #define _QUM_COPY(_skq, _dkq) do {                                          \
 	volatile uint16_t _sf = ((_dkq)->qum_qflags & QUM_F_SAVE_MASK);     \
 	_CASSERT(sizeof (_sf) == sizeof ((_dkq)->qum_qflags));              \
-	_CASSERT(offsetof(struct __quantum, __q_flags) == 24);              \
+	_CASSERT(offsetof(struct __quantum, __q_flags) == 20);              \
 	/* copy everything above (and excluding) __q_flags */               \
-	sk_copy64_24((uint64_t *)(void *)&(_skq)->qum_com,                  \
+	sk_copy64_20((uint64_t *)(void *)&(_skq)->qum_com,                  \
 	    (uint64_t *)(void *)&(_dkq)->qum_com);                          \
 	/* copy __q_flags and restore saved bits */                         \
 	(_dkq)->qum_qflags = ((_skq)->qum_qflags & ~QUM_F_SAVE_MASK) | _sf; \
@@ -390,8 +368,7 @@ struct __kern_packet {
 	 */
 	const uint16_t  pkt_bufs_max;       /* maximum size of buflet chain */
 	const uint16_t  pkt_bufs_cnt;       /* buflet chain size */
-	uint32_t        pkt_chain_count;    /* number of packets in chain */
-	uint32_t        pkt_chain_bytes;    /* number of bytes in chain */
+	struct __kern_buflet pkt_bufs[1];   /* 1 buflet! */
 } __attribute((aligned(sizeof(uint64_t))));
 
 /* the size of __user_packet structure for n total buflets */
@@ -407,8 +384,8 @@ struct __kern_packet {
 	volatile uint64_t __pflags = (_pflags);                         \
 	/* first wipe it clean */                                       \
 	_CASSERT(sizeof(struct __packet_com) == 32);                    \
-	_CASSERT(sizeof(struct __packet) == 32);                        \
-	sk_zero_32(&(_p)->pkt_com.__pkt_data[0]);                       \
+	_CASSERT(sizeof(struct __packet) == 24);                        \
+	sk_zero_24(&(_p)->pkt_com.__pkt_data[0]);                       \
 	/* then initialize */                                           \
 	(_p)->pkt_pflags = (__pflags);                                  \
 	(_p)->pkt_svc_class = KPKT_SC_UNSPEC;                           \
@@ -464,7 +441,6 @@ struct __kern_packet {
 	if (__probable(__fl != NULL)) {                                 \
 	        KPKT_CLEAR_FLOW_INIT(__fl);                             \
 	}                                                               \
-	(_p)->pkt_chain_count = (_p)->pkt_chain_bytes = 0;              \
 } while (0)
 
 #define KPKT_CTOR(_pk, _pflags, _opt, _flow, _txcomp, _midx, _pu, _pp,  \
@@ -523,11 +499,11 @@ struct __kern_packet {
  * after __p_flags.
  */
 #define _PKT_COPY(_skp, _dkp) do {                                      \
-	_CASSERT(sizeof(struct __packet) == 32);                        \
-	_CASSERT(sizeof(struct __packet_com) == 32);                    \
-	_CASSERT(offsetof(struct __packet, __p_flags) == 24);           \
+	_CASSERT(sizeof(struct __packet) == 24);                        \
+	_CASSERT(sizeof(struct __packet_com) == 24);                    \
+	_CASSERT(offsetof(struct __packet, __p_flags) == 16);           \
 	/* copy __packet excluding pkt_pflags */                        \
-	sk_copy64_24((uint64_t *)(void *)&(_skp)->pkt_com,              \
+	sk_copy64_16((uint64_t *)(void *)&(_skp)->pkt_com,              \
 	    (uint64_t *)(void *)&(_dkp)->pkt_com);                      \
 	/* copy relevant pkt_pflags bits */                             \
 	(_dkp)->pkt_pflags = ((_skp)->pkt_pflags & PKT_F_COPY_MASK);    \
@@ -738,7 +714,7 @@ KR_SLOT_ATTACH_BUF_METADATA(const kern_channel_ring_t kring,
 	 */
 	ASSERT(!KR_KERNEL_ONLY(kring));
 	ASSERT(kring->ckr_tx == CR_KIND_ALLOC);
-	USD_ATTACH_METADATA(KR_USD(kring, idx), kbuf->buf_bft_idx_reg);
+	USD_ATTACH_METADATA(KR_USD(kring, idx), kbuf->buf_idx_seg);
 	return 0;
 }
 

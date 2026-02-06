@@ -76,13 +76,13 @@ static kern_pbufpool_t skmth_pp;
 void
 skmem_test_init(void)
 {
-	lck_mtx_init(&skmt_lock, &sk_lock_group, &sk_lock_attr);
+	lck_mtx_init(&skmt_lock, sk_lock_group, sk_lock_attr);
 }
 
 void
 skmem_test_fini(void)
 {
-	lck_mtx_destroy(&skmt_lock, &sk_lock_group);
+	lck_mtx_destroy(&skmt_lock, sk_lock_group);
 }
 
 bool
@@ -228,13 +228,10 @@ skmem_buflet_tests(uint32_t flags)
 
 	SK_ERR("flags 0x%x", flags);
 
-	phary = (kern_packet_t *) kalloc_data(sizeof(kern_packet_t) * MAX_PH_ARY,
-	    Z_WAITOK | Z_ZERO);
-	phary2 = (kern_packet_t *) kalloc_data(sizeof(kern_packet_t) * MAX_PH_ARY,
-	    Z_WAITOK | Z_ZERO);
-	pharyc = (kern_packet_t *) kalloc_data(sizeof(kern_packet_t) * MAX_PH_ARY,
-	    Z_WAITOK | Z_ZERO);
-	mbary = _MALLOC(sizeof(struct mbuf *) * MAX_PH_ARY, M_TEMP,
+	MALLOC(phary, kern_packet_t *, (sizeof(kern_packet_t) * MAX_PH_ARY), M_TEMP, M_WAITOK | M_ZERO);
+	MALLOC(phary2, kern_packet_t *, (sizeof(kern_packet_t) * MAX_PH_ARY), M_TEMP, M_WAITOK | M_ZERO);
+	MALLOC(pharyc, kern_packet_t *, (sizeof(kern_packet_t) * MAX_PH_ARY), M_TEMP, M_WAITOK | M_ZERO);
+	MALLOC(mbary, struct mbuf **, sizeof(struct mbuf *) * MAX_PH_ARY, M_TEMP,
 	    M_WAITOK | M_ZERO);
 
 	os_ref_init(&skmem_pp_ctx.skmem_pp_ctx_refcnt, NULL);
@@ -278,13 +275,7 @@ skmem_buflet_tests(uint32_t flags)
 	VERIFY(kern_pbufpool_alloc(pp, 0, &ph) == EINVAL ||
 	    (flags & KBIF_BUFFER_ON_DEMAND));
 	if (ph != 0) {
-		kern_packet_t phc = 0;
-		kern_buflet_t buflet;
-
 		VERIFY(flags & KBIF_BUFFER_ON_DEMAND);
-		VERIFY((buflet = kern_packet_get_next_buflet(ph, NULL)) == NULL);
-		VERIFY(kern_packet_clone(ph, &phc, KPKT_COPY_LIGHT) == EINVAL);
-		VERIFY(kern_packet_clone(ph, &phc, KPKT_COPY_HEAVY) == EINVAL);
 		kern_pbufpool_free(pp, ph);
 		ph = 0;
 	}
@@ -466,8 +457,6 @@ skmem_buflet_tests(uint32_t flags)
 			    kern_buflet_get_object_segment(buflet2,
 			    &buf2_idx_seg));
 			VERIFY(buf_idx_seg == buf2_idx_seg);
-			VERIFY(buflet->buf_ctl == buflet2->buf_ctl);
-			VERIFY(buflet->buf_ctl->bc_usecnt == 2);
 			++phcloned;
 			VERIFY(__packet_finalize(pharyc[i]) == 0);
 			/* verify trace id isn't reused */
@@ -546,9 +535,6 @@ skmem_buflet_tests(uint32_t flags)
 		VERIFY(kern_packet_get_data_length(phary[i]) == BUFLEN);
 		VERIFY(kern_packet_get_data_length(phary[i]) ==
 		    kern_packet_get_data_length(pharyc[i]));
-		VERIFY(buflet->buf_ctl != buflet2->buf_ctl);
-		VERIFY(buflet->buf_ctl->bc_usecnt == 1);
-		VERIFY(buflet2->buf_ctl->bc_usecnt == 1);
 		VERIFY(memcmp(kern_buflet_get_data_address(buflet),
 		    kern_buflet_get_data_address(buflet2),
 		    kern_buflet_get_data_length(buflet)) == 0);
@@ -720,17 +706,10 @@ skmem_buflet_tests(uint32_t flags)
 		pp_mb = NULL;
 	}
 
-	_FREE(mbary, M_TEMP);
-	mbary = NULL;
-
-	kfree_data(phary, sizeof(kern_packet_t) * MAX_PH_ARY);
-	phary = NULL;
-
-	kfree_data(phary2, sizeof(kern_packet_t) * MAX_PH_ARY);
-	phary2 = NULL;
-
-	kfree_data(pharyc, sizeof(kern_packet_t) * MAX_PH_ARY);
-	pharyc = NULL;
+	FREE(mbary, M_TEMP);
+	FREE(phary, M_TEMP);
+	FREE(phary2, M_TEMP);
+	FREE(pharyc, M_TEMP);
 }
 
 static void
@@ -785,8 +764,7 @@ skmem_packet_tests(uint32_t flags)
 	test_unaligned = !(flags & KBIF_INHIBIT_CACHE);
 
 	/* allocate separately in case pool is setup for device memory */
-	ref_buffer = (uint8_t *) kalloc_data(SKMEM_TEST_BUFSIZE,
-	    Z_WAITOK | Z_ZERO);
+	MALLOC(ref_buffer, uint8_t *, SKMEM_TEST_BUFSIZE, M_TEMP, M_NOWAIT | M_ZERO);
 
 	bzero(&pp_init_mb, sizeof(pp_init_mb));
 	pp_init_mb.kbi_version = KERN_PBUFPOOL_CURRENT_VERSION;
@@ -1262,7 +1240,7 @@ skmem_packet_tests(uint32_t flags)
 	kern_pbufpool_destroy(pp);
 	pp = NULL;
 
-	kfree_data(ref_buffer, SKMEM_TEST_BUFSIZE);
+	FREE(ref_buffer, M_TEMP);
 	ref_buffer = NULL;
 }
 
@@ -1282,8 +1260,7 @@ skmem_quantum_tests(uint32_t flags)
 
 	SK_ERR("flags 0x%x", flags);
 
-	phary = (kern_packet_t *) kalloc_data(sizeof(kern_packet_t) * MAX_PH_ARY,
-	    Z_WAITOK | Z_ZERO);
+	MALLOC(phary, kern_packet_t *, sizeof(kern_packet_t) * MAX_PH_ARY, M_TEMP, M_WAITOK | M_ZERO);
 
 	bzero(&pp_init, sizeof(pp_init));
 	pp_init.kbi_version = KERN_PBUFPOOL_CURRENT_VERSION;
@@ -1396,8 +1373,7 @@ skmem_quantum_tests(uint32_t flags)
 	kern_pbufpool_destroy(pp);
 	pp = NULL;
 done:
-	kfree_data(phary, sizeof(kern_packet_t) * MAX_PH_ARY);
-	phary = NULL;
+	FREE(phary, M_TEMP);
 }
 
 static void
@@ -1406,7 +1382,6 @@ skmem_basic_tests(void)
 	/* basic sanity (alloc/free) tests on packet buflet KPIs */
 	skmem_buflet_tests(0);
 	skmem_buflet_tests(KBIF_PERSISTENT);
-	skmem_buflet_tests(KBIF_PERSISTENT | KBIF_NO_MAGAZINES);
 	skmem_buflet_tests(KBIF_PERSISTENT | KBIF_PHYS_CONTIGUOUS);
 	skmem_buflet_tests(KBIF_PERSISTENT | KBIF_PHYS_CONTIGUOUS |
 	    KBIF_USER_ACCESS);
@@ -1775,7 +1750,6 @@ skmem_advanced_tests(int n, int32_t th_max, uint32_t mode, boolean_t nosleep,
 
 	if (mph != 0) {
 		VERIFY((buflet = kern_packet_get_next_buflet( mph, NULL)) != NULL);
-		VERIFY(buflet->buf_ctl->bc_usecnt == 1);
 		kern_pbufpool_free(skmth_pp, mph);
 		mph = 0;
 	}
@@ -1852,7 +1826,6 @@ skmem_test_func(void *v, wait_result_t w)
 				    kern_buflet_get_object_segment(buflet2,
 				    &buf2_idx_seg));
 				VERIFY(buf_idx_seg == buf2_idx_seg);
-				VERIFY(buflet->buf_ctl == buflet2->buf_ctl);
 				VERIFY(__packet_finalize(skmth_info[i].sti_mpc) == 0);
 				kern_pbufpool_free(skmth_pp, skmth_info[i].sti_mpc);
 				skmth_info[i].sti_mpc = 0;
@@ -1861,14 +1834,11 @@ skmem_test_func(void *v, wait_result_t w)
 		}
 
 		/* force cache purges to exercise related code paths */
-		if (skmth_pp->pp_kmd_cache != NULL) {
-			skmem_cache_reap_now(skmth_pp->pp_kmd_cache, TRUE);
+		if (skmth_pp->pp_mdk_cache != NULL) {
+			skmem_cache_reap_now(skmth_pp->pp_mdk_cache, TRUE);
 		}
 		if (skmth_pp->pp_buf_cache != NULL) {
 			skmem_cache_reap_now(skmth_pp->pp_buf_cache, TRUE);
-		}
-		if (skmth_pp->pp_kbft_cache != NULL) {
-			skmem_cache_reap_now(skmth_pp->pp_kbft_cache, TRUE);
 		}
 	}
 
@@ -1939,8 +1909,7 @@ skmem_tests(uint32_t align)
 
 	SK_ERR("bufsize %u align %u", bufsize, align);
 
-	objary = _MALLOC(sizeof(void *) * objary_max, M_TEMP,
-	    M_WAITOK | M_ZERO);
+	MALLOC(objary, void **, (sizeof(void *) * objary_max), M_TEMP, M_WAITOK | M_ZERO);
 
 	(void) snprintf(name, sizeof(name), "skmem_test.%u.%u", bufsize, align);
 

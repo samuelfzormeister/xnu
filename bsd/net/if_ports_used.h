@@ -107,6 +107,12 @@ void if_ports_used_update_wakeuuid(struct ifnet *);
 struct inpcb;
 void if_ports_used_add_inpcb(const uint32_t ifindex, const struct inpcb *inp);
 
+#if SKYWALK
+struct ns_flow_info;
+struct flow_entry;
+bool if_ports_used_add_flow_entry(const struct flow_entry *fe, const uint32_t ifindex,
+    const struct ns_flow_info *nfi, uint32_t ns_flags);
+#endif /* SKYWALK */
 
 #endif /* XNU_KERNEL_PRIVATE */
 #endif /* PRIVATE */

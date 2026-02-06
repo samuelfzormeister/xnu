@@ -46,7 +46,7 @@ RB_GENERATE_PREV(flow_entry_id_tree, flow_entry, fe_id_link, fe_id_cmp);
 
 os_refgrp_decl(static, flow_entry_refgrp, "flow_entry", NULL);
 
-extern struct zone *sk_fed_zone;
+extern zone_t *sk_fed_zone;
 
 const struct flow_key fk_mask_2tuple
 __sk_aligned(16) =
@@ -155,12 +155,12 @@ flow_owner_find_by_pid(struct flow_owner_bucket *fob, pid_t pid, void *context)
 }
 
 struct flow_entry *
-flow_entry_find_by_uuid(struct flow_owner *fo, uuid_t uuid)
+flow_entry_find_by_rule_id(struct flow_owner *fo, uuid_t uuid)
 {
 	struct flow_entry find, *fe = NULL;
 	FOB_LOCK_ASSERT_HELD(FO_BUCKET(fo));
 
-	uuid_copy(find.fe_uuid, uuid);
+	uuid_copy(find.fe_rule_id, uuid);
 	fe = RB_FIND(flow_entry_id_tree, &fo->fo_flow_entry_id_head, &find);
 	if (fe != NULL) {
 		flow_entry_retain(fe);
@@ -307,7 +307,7 @@ flow_entry_alloc(struct flow_owner *fo, struct nx_flow_req *req, int *perr)
 	fe->fe_adv_idx = fadv_idx;
 
 	if (fe->fe_adv_idx != FLOWADV_IDX_NONE && fo->fo_nx_port_na != NULL) {
-		na_flowadv_entry_alloc(fo->fo_nx_port_na, fe->fe_uuid,
+		na_flowadv_entry_alloc(fo->fo_nx_port_na, fe->fe_euuid,
 		    fe->fe_adv_idx);
 	}
 
@@ -317,9 +317,8 @@ flow_entry_alloc(struct flow_owner *fo, struct nx_flow_req *req, int *perr)
 		fe->fe_svc_class = KPKT_SC_BE;
 	}
 
-	uuid_copy(fe->fe_eproc_uuid, req->nfr_euuid);
+	uuid_copy(fe->fe_euuid, req->nfr_euuid);
 	fe->fe_policy_id = req->nfr_policy_id;
-	fe->fe_inp_flowhash = req->nfr_inp_flowhash;
 
 	err = flow_mgr_flow_hash_mask_add(fm, fe->fe_key.fk_mask);
 	ASSERT(err == 0);

@@ -244,6 +244,8 @@ int fp_drop(struct proc *p, int fd, struct fileproc *fp, int locked);
 int fp_drop_written(proc_t p, int fd, struct fileproc *fp);
 int fp_drop_event(proc_t p, int fd, struct fileproc *fp);
 void fp_free(struct proc * p, int fd, struct fileproc * fp);
+struct kern_channel;
+int fp_getfchannel(struct proc *p, int fd, struct fileproc **resultfp, struct kern_channel **resultchannel);
 struct kqueue;
 int fp_getfkq(struct proc *p, int fd, struct fileproc **resultfp, struct kqueue  **resultkq);
 struct psemnode;

@@ -1178,10 +1178,6 @@ flow_agg_is_ok(struct flow_agg *fa, struct __kern_packet *pkt,
 		STATS_INC(fsws, FSW_STATS_RX_AGG_LIMIT);
 		goto done;
 	}
-	if (__improbable((pkt->pkt_pflags & PKT_F_WAKE_PKT) && fa->fa_total > 0)) {
-		DTRACE_SKYWALK1(aggr__fail1d, struct __kern_packet *, pkt);
-		goto done;
-	}
 
 	can_agg = can_agg_fastpath(fa, pkt, fsws);
 	if (can_agg) {

@@ -80,6 +80,11 @@
 
 #include <net/if_media.h>
 #include <net/ether_if_module.h>
+#if SKYWALK
+#include <skywalk/os_skywalk_private.h>
+#include <skywalk/nexus/netif/nx_netif.h>
+#include <skywalk/channel/channel_var.h>
+#endif /* SKYWALK */
 
 static boolean_t
 is_power_of_two(unsigned int val)
@@ -332,6 +337,20 @@ typedef uint16_t        iff_flags_t;
 #define IFF_FLAGS_MULTIBUFLETS          0x0010
 #define IFF_FLAGS_COPYPKT_MODE          0x0020
 
+#if SKYWALK
+
+typedef struct {
+	uuid_t                  fnx_provider;
+	uuid_t                  fnx_instance;
+} fake_nx, *fake_nx_t;
+
+typedef struct {
+    kern_pbufpool_t fpp_pp;
+    uint32_t fpp_retain_count;
+} *fake_packet_pool_t;
+
+static fake_packet_pool_t         S_fpp;
+#endif /* SKYWALK */
 
 struct if_fake {
 	char                    iff_name[IFNAMSIZ]; /* our unique id */
@@ -346,6 +365,21 @@ struct if_fake {
 	struct mbuf *           iff_pending_tx_packet;
 	boolean_t               iff_start_busy;
 	unsigned int            iff_max_mtu;
+#if SKYWALK
+	fake_nx                 iff_nx;
+	kern_channel_ring_t     iff_rx_ring[IFF_MAX_RX_RINGS];
+	kern_channel_ring_t     iff_tx_ring[IFF_MAX_TX_RINGS];
+	thread_call_t           iff_doorbell_tcall;
+	thread_call_t           iff_if_adv_tcall;
+	boolean_t               iff_doorbell_tcall_active;
+	boolean_t               iff_waiting_for_tcall;
+	boolean_t               iff_channel_connected;
+	fake_packet_pool_t      iff_fpp;
+	uint32_t                iff_tx_headroom;
+	unsigned int            iff_adv_interval;
+	uint32_t                iff_tx_drop_rate;
+	uint32_t                iff_tx_pkts_count;
+#endif /* SKYWALK */
 };
 
 typedef struct if_fake * if_fake_ref;
@@ -355,6 +389,9 @@ ifnet_get_if_fake(ifnet_t ifp);
 
 #define FETH_DPRINTF(fmt, ...)                                  \
 	{ if (if_fake_debug != 0) printf("%s " fmt, __func__, ## __VA_ARGS__); }
+
+#define FETH_PRINTF(fmt, ...)                                  \
+	printf("%s " fmt, __func__, ## __VA_ARGS__);
 
 static inline boolean_t
 feth_in_bsd_mode(if_fake_ref fakeif)
@@ -604,6 +641,92 @@ interface_link_event(ifnet_t ifp, u_int32_t event_code)
 	ifnet_event(ifp, &event.header);
 	return;
 }
+
+#if SKYWALK
+
+/*
+ * fake packet pool routines
+ */
+
+static fake_packet_pool_t
+fake_packet_pool_alloc(void)
+{
+    fake_packet_pool_t fpp;
+
+    MALLOC(fpp, fake_packet_pool_t, sizeof(*fpp), M_DEVBUF, M_ZERO);
+
+    return fpp;
+}
+
+static void
+fake_packet_pool_retain(fake_packet_pool_t fpp)
+{
+    LCK_MTX_ASSERT(feth_lck_mtx, LCK_ASSERT_OWNED);
+
+    fpp->fpp_retain_count++;
+
+    FETH_DPRINTF("retain count %d", fpp->fpp_retain_count);
+
+    lck_mtx_unlock(feth_lck_mtx);
+}
+
+static fake_packet_pool_t
+fake_packet_pool_make(boolean_t multi_buflet, u_int32_t mtu)
+{
+    struct kern_pbufpool_init kpbi;
+    kern_pbufpool_t pp;
+    fake_packet_pool_t fpp;
+
+    if (S_fpp) {
+        return S_fpp;
+    }
+
+    bzero(&kpbi, sizeof(kpbi));
+
+    kpbi.kbi_version = KERN_PBUFPOOL_VERSION_2;
+
+    snprintf((char *)kpbi.kbi_name, sizeof(pbufpool_name_t), "fake ethernet");
+
+    kpbi.kbi_flags |= KBIF_VIRTUAL_DEVICE;
+    kpbi.kbi_packets = 1024;
+
+    if (multi_buflet) {
+        kpbi.kbi_bufsize = if_fake_buflet_size;
+        kpbi.kbi_max_frags = howmany(mtu, if_fake_buflet_size);
+        kpbi.kbi_buflets = kpbi.kbi_packets * kpbi.kbi_max_frags;
+        kpbi.kbi_flags |= KBIF_BUFFER_ON_DEMAND;
+    } else {
+        kpbi.kbi_bufsize = mtu;
+        kpbi.kbi_max_frags = 1;
+        kpbi.kbi_buflets = kpbi.kbi_packets;
+    }
+
+    kpbi.kbi_buf_seg_size = skmem_usr_buf_seg_size;
+
+    if (if_fake_user_access) {
+        kpbi.kbi_flags |= KBIF_USER_ACCESS;
+    }
+
+    kpbi.kbi_ctx = NULL;
+    kpbi.kbi_ctx_retain = NULL;
+    kpbi.kbi_ctx_release = NULL;
+
+    errno_t err = kern_pbufpool_create(&kpbi, &pp, NULL);
+
+    if (err == 0) {
+        fpp = fake_packet_pool_alloc();
+
+        if (S_fpp == NULL) {
+            S_fpp = fpp;
+        }
+
+    } else {
+        FETH_PRINTF("kern_pbufpool_create failed, %d", err);
+        return NULL;
+    }
+}
+
+#endif
 
 static if_fake_ref
 ifnet_get_if_fake(ifnet_t ifp)

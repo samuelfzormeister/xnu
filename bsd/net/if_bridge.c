@@ -177,6 +177,9 @@
 #include <netinet/bootp.h>
 #include <netinet/dhcp.h>
 
+#if SKYWALK
+#include <skywalk/nexus/netif/nx_netif.h>
+#endif /* SKYWALK */
 
 #if BRIDGE_DEBUG
 #define BR_DBGF_LIFECYCLE       0x0001

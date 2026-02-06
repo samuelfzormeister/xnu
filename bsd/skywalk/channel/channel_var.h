@@ -128,7 +128,7 @@ struct slot_ctx {
 	mach_vm_address_t       slot_ctx_arg;   /* per-slot context */
 };
 
-extern lck_attr_t channel_lock_attr;
+extern lck_attr_t *channel_lock_attr;
 extern uint64_t __ch_umd_redzone_cookie;
 extern uint32_t kr_stat_enable;
 
@@ -702,7 +702,7 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
 	    (_ksd2); \
 } while (0)
 
-#define _MD_BUFLET_ADDROFF(_md, _addr, _objaddr, _doff, _dlen, _dlim) do { \
+#define _MD_BUFLET_ADDROFF(_md, _addr, _doff, _dlen, _dlim) do { \
 	struct __kern_quantum *_q = SK_PTR_ADDR_KQUM(_md);              \
 	switch (METADATA_TYPE(_q)) {                                    \
 	case NEXUS_META_TYPE_PACKET: {                                  \
@@ -711,7 +711,6 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
 	        struct __kern_buflet *_kbft;                            \
 	        PKT_GET_FIRST_BUFLET(_p, _p->pkt_bufs_cnt, _kbft);      \
 	        (_addr) = __DECONST(void *, _kbft->buf_addr);           \
-	        (_objaddr) = _kbft->buf_objaddr;                        \
 	        (_doff) = _kbft->buf_doff;                              \
 	        (_dlen) = _kbft->buf_dlen;                              \
 	        (_dlim) = _kbft->buf_dlim;                              \
@@ -719,14 +718,12 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
 	}                                                               \
 	default:                                                        \
 	        (_addr) = __DECONST(void *, _q->qum_buf[0].buf_addr);   \
-	        (_objaddr) = _q->qum_buf[0].buf_objaddr;                \
 	        (_doff) = _q->qum_buf[0].buf_doff;                      \
 	        (_dlen) = _q->qum_buf[0].buf_dlen;                      \
 	        (_dlim) = _q->qum_buf[0].buf_dlim;                      \
 	        break;                                                  \
 	}                                                               \
 	ASSERT((_addr) != NULL);                                        \
-	ASSERT((_objaddr) != NULL);                                     \
 } while (0)
 
 #define _MD_BUFLET_ADDR_PKT(_md, _addr) do { \
@@ -746,9 +743,9 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
  * first buffer's address.
  */
 #define MD_BUFLET_ADDR(_md, _val) do {                                  \
-	void *_addr, *_objaddr;                                         \
+	void *_addr;                                                    \
 	uint16_t _doff, _dlen, _dlim;                                   \
-	_MD_BUFLET_ADDROFF(_md, _addr, _objaddr, _doff, _dlen, _dlim);  \
+	_MD_BUFLET_ADDROFF(_md, _addr, _doff, _dlen, _dlim);            \
 	/* skip past buflet data offset */                              \
 	(_val) = (void *)((uint8_t *)_addr + _doff);                    \
 } while (0)
@@ -758,11 +755,11 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
  * metadata; for metadata with multiple buflets, this is the first
  * buffer's address.
  */
-#define MD_BUFLET_ADDR_ABS(_md, _val) do {                              \
-	void *_addr, *_objaddr;                                         \
-	uint16_t _doff, _dlen, _dlim;                                   \
-	_MD_BUFLET_ADDROFF(_md, _addr, _objaddr, _doff, _dlen, _dlim);  \
-	(_val) = (void *)_addr;                                         \
+#define MD_BUFLET_ADDR_ABS(_md, _val) do {                         \
+	void *_addr;                                          \
+	uint16_t _doff, _dlen, _dlim;                         \
+	_MD_BUFLET_ADDROFF(_md, _addr, _doff, _dlen, _dlim);  \
+	(_val) = (void *)_addr;                               \
 } while (0)
 
 /* similar to MD_BUFLET_ADDR_ABS() but optimized only for packets */
@@ -774,21 +771,9 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
 
 
 #define MD_BUFLET_ADDR_ABS_DLEN(_md, _val, _dlen, _dlim, _doff) do {    \
-	void *_addr, *_objaddr;                                         \
-	_MD_BUFLET_ADDROFF(_md, _addr, _objaddr, _doff, _dlen, _dlim);  \
-	(_val) = (void *)_addr;                                         \
-} while (0)
-
-
-/*
- * Return the buffer's object address associated with the metadata; for
- * metadata with multiple buflets, this is the first buffer's object address.
- */
-#define MD_BUFLET_OBJADDR(_md, _val) do {                               \
-	void *_addr, *_objaddr;                                         \
-	uint16_t _doff, _dlen, _dlim;                                   \
-	_MD_BUFLET_ADDROFF(_md, _addr, _objaddr, _doff, _dlen, _dlim);  \
-	(_val) = (void *)_objaddr;                                      \
+	void *_addr;                                          \
+	_MD_BUFLET_ADDROFF(_md, _addr, _doff, _dlen, _dlim);  \
+	(_val) = (void *)_addr;                               \
 } while (0)
 
 /*
@@ -797,11 +782,11 @@ KR_SLOT_INDEX(const struct __kern_channel_ring *kr,
  * first buffer's address and data length.
  */
 #define MD_BUFLET_ADDR_DLEN(_md, _val, _dlen) do {                      \
-	void *_addr, *_objaddr;                                         \
-	uint16_t _doff, _dlim;                                          \
-	_MD_BUFLET_ADDROFF(_md, _addr, _objaddr, _doff, _dlen, _dlim);  \
-	/* skip past buflet data offset */                              \
-	(_val) = (void *)((uint8_t *)_addr + _doff);                    \
+	void *_addr;                                          \
+	uint16_t _doff, _dlim;                                \
+	_MD_BUFLET_ADDROFF(_md, _addr, _doff, _dlen, _dlim);  \
+	/* skip past buflet data offset */                    \
+	(_val) = (void *)((uint8_t *)_addr + _doff);          \
 } while (0)
 
 /* kr_space: return available space for enqueue into kring */

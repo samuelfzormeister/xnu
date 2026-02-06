@@ -697,7 +697,7 @@ sk_copy64_64x(uint64_t *src, uint64_t *dst, size_t l)
 #define _sk_free(probename, elem)                                   \
 {                                                                   \
 	DTRACE_SKYWALK1(probename, void *, (elem));                     \
-	__FREE((elem), M_TEMP);                                         \
+	_FREE((elem), M_TEMP);                                         \
 }
 
 #define _sk_alloc_type(probename, type, flags, tag) \

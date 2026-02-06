@@ -180,7 +180,7 @@ flow_track_tcp_rtt(struct flow_entry *fe, boolean_t input,
 			dst->fse_rtt.frtt_seg_begin = seq;
 			dst->fse_rtt.frtt_seg_end = seq + ulen;
 			KDBG((SK_KTRACE_FSW_FLOW_TRACK_RTT | DBG_FUNC_START),
-			    SK_KVA(fe), fe->fe_pid, ntohs(fe->fe_key.fk_sport),
+			    SK_KVA(fe), fe->fe_effective_pid, ntohs(fe->fe_key.fk_sport),
 			    input ? 1 : 0);
 		}
 	}
@@ -207,7 +207,7 @@ flow_track_tcp_rtt(struct flow_entry *fe, boolean_t input,
 			src->fse_rtt.frtt_timestamp = 0;
 			src->fse_rtt.frtt_last = 0;
 			KDBG((SK_KTRACE_FSW_FLOW_TRACK_RTT | DBG_FUNC_END),
-			    SK_KVA(fe), fe->fe_pid, ntohs(fe->fe_key.fk_sport),
+			    SK_KVA(fe), fe->fe_effective_pid, ntohs(fe->fe_key.fk_sport),
 			    input ? 0 : 1);
 
 			/* publish rtt stats into flow_stats object */
@@ -521,7 +521,7 @@ done:
 	 * If this needs immediate attention, indicate so.
 	 */
 	if (__improbable((ftflags & FTF_NODELAY) != 0)) {
-		fe->fe_rx_nodelay = true;
+		fe->fe_flags |= FLOWENTF_;
 		ftflags &= ~FTF_NODELAY;
 	} else {
 		fe->fe_rx_nodelay = false;
@@ -560,9 +560,6 @@ done:
 	 */
 	if (__improbable((ftflags & FTF_WITHDRAWN) != 0)) {
 		ftflags &= ~FTF_WITHDRAWN;
-		if (fe->fe_flags & FLOWENTF_HALF_CLOSED) {
-			atomic_bitclear_32(&fe->fe_flags, FLOWENTF_HALF_CLOSED);
-		}
 		fe->fe_want_withdraw = 1;
 	}
 

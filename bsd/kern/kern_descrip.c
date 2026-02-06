@@ -3845,6 +3845,61 @@ fp_getfkq(proc_t p, int fd, struct fileproc **resultfp,
 	return 0;
 }
 
+/*
+ * fp_getfchannel
+ *
+ * Description:	Get fileproc and __kern_channel pointer for a given fd from the
+ *		per process open file table of the specified process, and if
+ *		successful, increment the f_iocount
+ *
+ * Parameters:	p				Process in which fd lives
+ *		fd				fd to get information for
+ *		resultfp			Pointer to result fileproc
+ *						pointer area, or 0 if none
+ *		resultchannel	    Pointer to result __kern_channel
+ *						pointer area, or 0 if none
+ *
+ * Returns:	EBADF			The file descriptor is invalid
+ *		EBADF			The file descriptor is not a socket
+ *		0			Success
+ *
+ * Implicit returns:
+ *		*resultfp      (modified)		Fileproc pointer
+ *		*resultchannel (modified)		__kern_channel pointer
+ *
+ * Notes:	The second EBADF should probably be something else to make
+ *		the error condition distinct.
+ */
+int
+fp_getfchannel(proc_t p, int fd, struct fileproc **resultfp,
+    struct kern_channel **resultchannel)
+{
+	struct filedesc *fdp = p->p_fd;
+	struct fileproc *fp;
+
+	proc_fdlock_spin(p);
+	if (fd < 0 || fd >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[fd]) == NULL ||
+	    (fdp->fd_ofileflags[fd] & UF_RESERVED)) {
+		proc_fdunlock(p);
+		return EBADF;
+	}
+	if (fp->f_type != DTYPE_CHANNEL) {
+		proc_fdunlock(p);
+		return EBADF;
+	}
+	os_ref_retain_locked(&fp->f_iocount);
+
+	if (resultfp) {
+		*resultfp = fp;
+	}
+	if (resultchannel) {
+		*resultchannel = (struct __kern_channel *)fp->f_data;
+	}
+	proc_fdunlock(p);
+
+	return 0;
+}
 
 /*
  * fp_getfpshm

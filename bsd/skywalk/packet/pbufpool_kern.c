@@ -26,6 +26,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
+#include "skywalk/mem/skmem_region_var.h"
 #include <skywalk/os_skywalk_private.h>
 #include <skywalk/packet/pbufpool_var.h>
 
@@ -110,67 +111,25 @@ kern_pbufpool_create(const struct kern_pbufpool_init *init,
 
 	/* pick the right md and buf region based on direction */
 	bzero(&srp, sizeof(srp));
-	srp[SKMEM_REGION_UMD] = *skmem_get_default(SKMEM_REGION_UMD);
-	umd_srp = &srp[SKMEM_REGION_UMD];
-
-	if (init->kbi_flags & KBIF_BUFFER_ON_DEMAND) {
-		srp[SKMEM_REGION_KBFT] = *skmem_get_default(SKMEM_REGION_KBFT);
-		kbft_srp = &srp[SKMEM_REGION_KBFT];
-	}
-	if ((kbft_srp != NULL) && (init->kbi_flags & KBIF_USER_ACCESS)) {
-		srp[SKMEM_REGION_UBFT] = *skmem_get_default(SKMEM_REGION_UBFT);
-		ubft_srp = &srp[SKMEM_REGION_UBFT];
-	}
-
-	switch (init->kbi_flags & (KBIF_IODIR_IN | KBIF_IODIR_OUT)) {
-	case KBIF_IODIR_IN:
-		srp[SKMEM_REGION_RXBUF] = *skmem_get_default(SKMEM_REGION_RXBUF);
-		srp[SKMEM_REGION_RXKMD] = *skmem_get_default(SKMEM_REGION_RXKMD);
-		buf_srp = &srp[SKMEM_REGION_RXBUF];
-		kmd_srp = &srp[SKMEM_REGION_RXKMD];
-		tx_pool = false;
-		break;
-	case KBIF_IODIR_OUT:
-		srp[SKMEM_REGION_TXBUF] = *skmem_get_default(SKMEM_REGION_TXBUF);
-		srp[SKMEM_REGION_TXKMD] = *skmem_get_default(SKMEM_REGION_TXKMD);
-		buf_srp = &srp[SKMEM_REGION_TXBUF];
-		kmd_srp = &srp[SKMEM_REGION_TXKMD];
-		break;
-	case (KBIF_IODIR_IN | KBIF_IODIR_OUT):
-	default:
-		srp[SKMEM_REGION_BUF] = *skmem_get_default(SKMEM_REGION_BUF);
-		srp[SKMEM_REGION_KMD] = *skmem_get_default(SKMEM_REGION_KMD);
-		buf_srp = &srp[SKMEM_REGION_BUF];
-		kmd_srp = &srp[SKMEM_REGION_KMD];
-		break;
-	}
-
-	if (init->kbi_flags & KBIF_KERNEL_READONLY) {
-		buf_srp->srp_cflags |= SKMEM_REGION_CR_KREADONLY;
-	}
+	memcpy(&srp[SKMEM_REGION_MDU], skmem_get_default(SKMEM_REGION_MDU), sizeof(struct skmem_region_params));
+	umd_srp = &srp[SKMEM_REGION_MDU];
+	memcpy(&srp[SKMEM_REGION_MDK], skmem_get_default(SKMEM_REGION_MDK), sizeof(struct skmem_region_params));
+	kmd_srp = &srp[SKMEM_REGION_MDK];
+    memcpy(&srp[SKMEM_REGION_BUF], skmem_get_default(SKMEM_REGION_BUF), sizeof(struct skmem_region_params));
+	buf_srp = &srp[SKMEM_REGION_BUF];
 
 	/*
 	 * Disable/enable magazine layer for metadata.
 	 */
-	if (init->kbi_flags & KBIF_NO_MAGAZINES) {
-		umd_srp->srp_cflags |= SKMEM_REGION_CR_NOMAGAZINES;
-		kmd_srp->srp_cflags |= SKMEM_REGION_CR_NOMAGAZINES;
-		if (kbft_srp != NULL) {
-			kbft_srp->srp_cflags |= SKMEM_REGION_CR_NOMAGAZINES;
-		}
-		if (ubft_srp != NULL) {
-			ubft_srp->srp_cflags |= SKMEM_REGION_CR_NOMAGAZINES;
-		}
-	} else {
-		umd_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
-		kmd_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
-		if (kbft_srp != NULL) {
-			kbft_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
-		}
-		if (ubft_srp != NULL) {
-			ubft_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
-		}
+	umd_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
+	kmd_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
+	if (kbft_srp != NULL) {
+		kbft_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
 	}
+	if (ubft_srp != NULL) {
+		ubft_srp->srp_cflags &= ~SKMEM_REGION_CR_NOMAGAZINES;
+	}
+
 	umd_srp->srp_cflags |= SKMEM_REGION_CR_PERSISTENT;
 	kmd_srp->srp_cflags |= SKMEM_REGION_CR_PERSISTENT;
 	if (kbft_srp != NULL) {
@@ -207,8 +166,7 @@ kern_pbufpool_create(const struct kern_pbufpool_init *init,
 	buf_cnt = MAX(pkt_cnt, init->kbi_buflets);
 
 	/* adjust region params; we may override below */
-	pp_regions_params_adjust(buf_srp, kmd_srp, umd_srp, kbft_srp,
-	    ubft_srp, md_type, md_subtype, pkt_cnt, max_frags,
+	pp_regions_params_adjust(srp, md_type, md_subtype, pkt_cnt, max_frags,
 	    init->kbi_bufsize, buf_cnt);
 
 	/*

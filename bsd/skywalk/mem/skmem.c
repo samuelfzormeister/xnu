@@ -26,7 +26,6 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
-#include "skywalk/mem/skmem_var.h"
 #include <skywalk/os_skywalk_private.h>
 #include <machine/limits.h>
 #include <machine/machine_routines.h>
@@ -66,27 +65,14 @@
  */
 static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 	/*
-	 * Leading guard page(s): {mappable, no-read-write, no-cache}
-	 */
-	[SKMEM_REGION_GUARD_HEAD] = {
-		.srp_name       = "headguard",
-		.srp_id         = SKMEM_REGION_GUARD_HEAD,
-		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_GUARD | SKMEM_REGION_CR_NOMAGAZINES |
-    SKMEM_REGION_CR_NOREDIRECT,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-
-	/*
 	 * Schema: {mappable, read-only, no-cache}
 	 */
 	[SKMEM_REGION_SCHEMA] = {
 		.srp_name       = "schema",
 		.srp_id         = SKMEM_REGION_SCHEMA,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_UREADONLY | SKMEM_REGION_CR_NOMAGAZINES |
-    SKMEM_REGION_CR_NOREDIRECT | SKMEM_REGION_CR_PUREDATA,
+    SKMEM_REGION_CR_READONLY | SKMEM_REGION_CR_NOMAGAZINES |
+    SKMEM_REGION_CR_NOREDIRECT,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -98,7 +84,7 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "ring",
 		.srp_id         = SKMEM_REGION_RING,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_PUREDATA,
+    SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -110,57 +96,20 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "buf",
 		.srp_id         = SKMEM_REGION_BUF,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_IODIR_IN |
-    SKMEM_REGION_CR_IODIR_OUT | SKMEM_REGION_CR_SHAREOK |
-    SKMEM_REGION_CR_PUREDATA,
+    SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
-	[SKMEM_REGION_RXBUF] = {
-		.srp_name       = "rxbuf",
-		.srp_id         = SKMEM_REGION_RXBUF,
-		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_IODIR_IN |
-    SKMEM_REGION_CR_SHAREOK | SKMEM_REGION_CR_PUREDATA,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-	[SKMEM_REGION_TXBUF] = {
-		.srp_name       = "txbuf",
-		.srp_id         = SKMEM_REGION_TXBUF,
-		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_IODIR_OUT |
-    SKMEM_REGION_CR_SHAREOK | SKMEM_REGION_CR_PUREDATA,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-
 	/*
 	 * Userspace metadata: {mappable}
 	 */
-	[SKMEM_REGION_UMD] = {
-		.srp_name       = "umd",
-		.srp_id         = SKMEM_REGION_UMD,
+	[SKMEM_REGION_MDU] = {
+		.srp_name       = "mdu",
+		.srp_id         = SKMEM_REGION_MDU,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
     SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_QUANTUM,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_PAYLOAD,
-		.srp_max_frags  = 1,
-	},
-
-	/*
-	 * Userspace buflet metadata: {mappable}
-	 */
-	[SKMEM_REGION_UBFT] = {
-		.srp_name       = "ubft",
-		.srp_id         = SKMEM_REGION_UBFT,
-		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_NOMAGAZINES,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 		.srp_max_frags  = 1,
 	},
 
@@ -171,7 +120,7 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "txausd",
 		.srp_id         = SKMEM_REGION_TXAUSD,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_UREADONLY | SKMEM_REGION_CR_NOMAGAZINES,
+    SKMEM_REGION_CR_READONLY | SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -183,7 +132,7 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "rxfusd",
 		.srp_id         = SKMEM_REGION_RXFUSD,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_UREADONLY | SKMEM_REGION_CR_NOMAGAZINES,
+    SKMEM_REGION_CR_READONLY | SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -195,8 +144,7 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "ustats",
 		.srp_id         = SKMEM_REGION_USTATS,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_MONOLITHIC | SKMEM_REGION_CR_NOMAGAZINES |
-    SKMEM_REGION_CR_PUREDATA,
+    SKMEM_REGION_CR_MONOLITHIC | SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -208,8 +156,8 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "flowadv",
 		.srp_id         = SKMEM_REGION_FLOWADV,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_UREADONLY | SKMEM_REGION_CR_MONOLITHIC |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_PUREDATA,
+    SKMEM_REGION_CR_READONLY | SKMEM_REGION_CR_MONOLITHIC |
+    SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -221,9 +169,8 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "nexusadv",
 		.srp_id         = SKMEM_REGION_NEXUSADV,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_UREADONLY | SKMEM_REGION_CR_MONOLITHIC |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_PERSISTENT |
-    SKMEM_REGION_CR_PUREDATA,
+    SKMEM_REGION_CR_READONLY | SKMEM_REGION_CR_MONOLITHIC |
+    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_PERSISTENT,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -235,22 +182,8 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "sysctls",
 		.srp_id         = SKMEM_REGION_SYSCTLS,
 		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_UREADONLY | SKMEM_REGION_CR_MONOLITHIC |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_NOREDIRECT |
-    SKMEM_REGION_CR_PUREDATA,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-
-	/*
-	 * Trailing guard page(s): {mappable, no-read-write, no-cache}
-	 */
-	[SKMEM_REGION_GUARD_TAIL] = {
-		.srp_name       = "tailguard",
-		.srp_id         = SKMEM_REGION_GUARD_TAIL,
-		.srp_cflags     = SKMEM_REGION_CR_MMAPOK |
-    SKMEM_REGION_CR_GUARD | SKMEM_REGION_CR_NOMAGAZINES |
-    SKMEM_REGION_CR_NOREDIRECT,
+    SKMEM_REGION_CR_READONLY | SKMEM_REGION_CR_MONOLITHIC |
+    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_NOREDIRECT,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -258,59 +191,13 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 	/*
 	 * Kernel metadata.
 	 */
-	[SKMEM_REGION_KMD] = {
-		.srp_name       = "kmd",
-		.srp_id         = SKMEM_REGION_KMD,
+	[SKMEM_REGION_MDK] = {
+		.srp_name       = "mdk",
+		.srp_id         = SKMEM_REGION_MDK,
 		.srp_cflags     = SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_QUANTUM,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_PAYLOAD,
 		.srp_max_frags  = 1,
-	},
-	[SKMEM_REGION_RXKMD] = {
-		.srp_name       = "rxkmd",
-		.srp_id         = SKMEM_REGION_RXKMD,
-		.srp_cflags     = SKMEM_REGION_CR_NOMAGAZINES,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_QUANTUM,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_PAYLOAD,
-		.srp_max_frags  = 1,
-	},
-	[SKMEM_REGION_TXKMD] = {
-		.srp_name       = "txkmd",
-		.srp_id         = SKMEM_REGION_TXKMD,
-		.srp_cflags     = SKMEM_REGION_CR_NOMAGAZINES,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_QUANTUM,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_PAYLOAD,
-		.srp_max_frags  = 1,
-	},
-
-	/*
-	 * kernel buflet metadata.
-	 */
-	[SKMEM_REGION_KBFT] = {
-		.srp_name       = "kbft",
-		.srp_id         = SKMEM_REGION_KBFT,
-		.srp_cflags     = SKMEM_REGION_CR_NOMAGAZINES,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-	[SKMEM_REGION_RXKBFT] = {
-		.srp_name       = "rxkbft",
-		.srp_id         = SKMEM_REGION_RXKBFT,
-		.srp_cflags     = SKMEM_REGION_CR_NOMAGAZINES,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-	[SKMEM_REGION_TXKBFT] = {
-		.srp_name       = "txkbft",
-		.srp_id         = SKMEM_REGION_TXKBFT,
-		.srp_cflags     = SKMEM_REGION_CR_NOMAGAZINES,
-		.srp_r_obj_cnt  = 0,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
 
 	/*
@@ -342,18 +229,7 @@ static const struct skmem_region_params skmem_regions[SKMEM_REGIONS] = {
 		.srp_name       = "kstats",
 		.srp_id         = SKMEM_REGION_KSTATS,
 		.srp_cflags     = SKMEM_REGION_CR_MONOLITHIC |
-    SKMEM_REGION_CR_NOMAGAZINES | SKMEM_REGION_CR_PUREDATA,
-		.srp_md_type    = NEXUS_META_TYPE_INVALID,
-		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
-	},
-
-	/*
-	 * Intrinsic objects.
-	 */
-	[SKMEM_REGION_INTRINSIC] = {
-		.srp_name       = "intrinsic",
-		.srp_id         = SKMEM_REGION_INTRINSIC,
-		.srp_cflags     = SKMEM_REGION_CR_PSEUDO,
+    SKMEM_REGION_CR_NOMAGAZINES,
 		.srp_md_type    = NEXUS_META_TYPE_INVALID,
 		.srp_md_subtype = NEXUS_META_SUBTYPE_INVALID,
 	},
@@ -416,7 +292,6 @@ skmem_init(void)
 	(void) skmem_cpu_cache_line_size();
 
 	skmem_arena_init();
-	skmem_cache_pre_init();
 	skmem_region_init();
 	skmem_cache_init();
 	pp_init();

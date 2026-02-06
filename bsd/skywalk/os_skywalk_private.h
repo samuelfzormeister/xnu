@@ -304,6 +304,7 @@ extern uint64_t sk_verbose;
 #include <skywalk/channel/os_channel_event.h>
 #include <skywalk/channel/channel_var.h>
 #include <skywalk/nexus/nexus_var.h>
+#include <skywalk/nexus/flowswitch/fsw_var.h>
 #include <skywalk/packet/pbufpool_var.h>
 #include <skywalk/packet/packet_var.h>
 #endif /* BSD_KERNEL_PRIVATE */

@@ -1040,9 +1040,6 @@ convert_native_pkt_to_mbuf_chain(struct nx_flowswitch *fsw,
 		    PKT_LINKF_ETHFCS) != 0)) {
 			m->m_flags |= M_HASFCS;
 		}
-		if (__improbable(pkt->pkt_pflags & PKT_F_WAKE_PKT)) {
-			m->m_pkthdr.pkt_flags |= PKTF_WAKE_PKT;
-		}
 		ASSERT(m->m_nextpkt == NULL);
 		tail = m;
 		*tailp = m;

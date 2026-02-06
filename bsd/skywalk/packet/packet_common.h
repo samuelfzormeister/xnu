@@ -99,18 +99,26 @@
 	        (_buf) = NULL;                                          \
 	        break;                                                  \
 	}                                                               \
-	if (__probable((_pkt)->pkt_qum_buf.buf_addr != 0)) {            \
-	        (_buf) = &(_pkt)->pkt_qum_buf;                          \
-	} else {                                                        \
-	        (_buf) = __DECONST(void *, (_pkt)->pkt_qum_buf.buf_nbft_addr);\
+	if (__probable((_pkt)->pkt_bufs[0].buf_addr != 0)) {            \
+	        (_buf) = &(_pkt)->pkt_bufs[0];                          \
 	}                                                               \
 } while (0)
 
+/*
+ * SAMUEL ZORMEISTER:
+ * This arguably could be better, but for my own sake I'll do it like
+ * this for sanity.
+ */
 #define _PKT_GET_NEXT_BUFLET(_pkt, _bcnt, _pbuf, _buf) do {             \
 	if ((_pbuf) == NULL) {                                          \
 	        PKT_GET_FIRST_BUFLET(_pkt, _bcnt, _buf);                \
 	} else {                                                        \
-	        (_buf) = __DECONST(void *, (_pbuf)->buf_nbft_addr);     \
+	    for (uint32_t _i = 0; _i < _bcnt; _i++) {                   \
+			if (_pbuf == &_pkt->pkt_bufs[_i]) {                     \
+			    (_buf) = &_pkt->pkt_bufs[_i++];                     \
+				break;                                              \
+			}		                                                \
+		}                                                           \
 	}                                                               \
 } while (0)
 
@@ -547,22 +555,6 @@ __packet_get_vlan_priority(const uint16_t vlan_tag)
 #ifdef KERNEL
 __attribute__((always_inline))
 static inline void
-__packet_set_wake_flag(const uint64_t ph)
-{
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-	PKT_ADDR(ph)->pkt_pflags |= PKT_F_WAKE_PKT;
-}
-#endif
-
-__attribute__((always_inline))
-static inline boolean_t
-__packet_get_wake_flag(const uint64_t ph)
-{
-	return (PKT_ADDR(ph)->pkt_pflags & PKT_F_WAKE_PKT) != 0;
-}
-
-__attribute__((always_inline))
-static inline void
 __packet_set_keep_alive(const uint64_t ph, const boolean_t is_keep_alive)
 {
 	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
@@ -612,7 +604,7 @@ __packet_set_service_class(const uint64_t ph, const uint32_t sc)
 {
 	int err = 0;
 
-	_CASSERT(sizeof(QUM_ADDR(ph)->qum_svc_class == sizeof(uint32_t)));
+	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
 
 	switch (sc) {
 	case PKT_SC_BE:
@@ -626,7 +618,7 @@ __packet_set_service_class(const uint64_t ph, const uint32_t sc)
 	case PKT_SC_SIG:
 	case PKT_SC_VO:
 	case PKT_SC_CTL:
-		QUM_ADDR(ph)->qum_svc_class = sc;
+        PKT_ADDR(ph)->pkt_svc_class = sc;
 		break;
 
 	default:
@@ -643,9 +635,9 @@ __packet_get_service_class(const uint64_t ph)
 {
 	uint32_t sc;
 
-	_CASSERT(sizeof(QUM_ADDR(ph)->qum_svc_class == sizeof(uint32_t)));
+	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
 
-	switch (QUM_ADDR(ph)->qum_svc_class) {
+	switch (PKT_ADDR(ph)->pkt_svc_class) {
 	case PKT_SC_BE:         /* most likely best effort */
 	case PKT_SC_BK_SYS:
 	case PKT_SC_BK:
@@ -657,7 +649,7 @@ __packet_get_service_class(const uint64_t ph)
 	case PKT_SC_SIG:
 	case PKT_SC_VO:
 	case PKT_SC_CTL:
-		sc = QUM_ADDR(ph)->qum_svc_class;
+		sc = PKT_ADDR(ph)->pkt_svc_class;
 		break;
 
 	default:
@@ -666,26 +658,6 @@ __packet_get_service_class(const uint64_t ph)
 	}
 
 	return sc;
-}
-
-__attribute__((always_inline))
-static inline void
-__packet_set_comp_gencnt(const uint64_t ph, const uint32_t gencnt)
-{
-	_CASSERT(sizeof(PKT_ADDR(ph)->pkt_comp_gencnt == sizeof(uint32_t)));
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-
-	PKT_ADDR(ph)->pkt_comp_gencnt = gencnt;
-}
-
-__attribute__((always_inline))
-static inline uint32_t
-__packet_get_comp_gencnt(const uint64_t ph)
-{
-	_CASSERT(sizeof(PKT_ADDR(ph)->pkt_comp_gencnt == sizeof(uint32_t)));
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-
-	return PKT_ADDR(ph)->pkt_comp_gencnt;
 }
 
 
@@ -849,16 +821,6 @@ __packet_clear_flow_uuid(const uint64_t ph)
 }
 
 __attribute__((always_inline))
-static inline uint8_t
-__packet_get_aggregation_type(const uint64_t ph)
-{
-	_CASSERT(sizeof(PKT_ADDR(ph)->pkt_aggr_type == sizeof(uint8_t)));
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-
-	return PKT_ADDR(ph)->pkt_aggr_type;
-}
-
-__attribute__((always_inline))
 static inline uint32_t
 __packet_get_data_length(const uint64_t ph)
 {
@@ -901,71 +863,6 @@ __packet_get_buflet_count(const uint64_t ph)
 		break;
 	}
 	return bcnt;
-}
-
-__attribute__((always_inline))
-static inline int
-__packet_add_buflet(const uint64_t ph, const void *bprev0, const void *bnew0)
-{
-	uint16_t bcnt;
-
-#ifdef KERNEL
-	kern_buflet_t bprev = __DECONST(kern_buflet_t, bprev0);
-	kern_buflet_t bnew = __DECONST(kern_buflet_t, bnew0);
-
-	VERIFY(PKT_ADDR(ph) && bnew && (bnew != bprev));
-	VERIFY(PP_HAS_BUFFER_ON_DEMAND(PKT_ADDR(ph)->pkt_qum.qum_pp));
-#else /* !KERNEL */
-	buflet_t bprev = __DECONST(buflet_t, bprev0);
-	buflet_t bnew = __DECONST(buflet_t, bnew0);
-
-	if (__improbable(!PKT_ADDR(ph) || !bnew || (bnew == bprev))) {
-		return EINVAL;
-	}
-#endif /* !KERNEL */
-
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-	bcnt = PKT_ADDR(ph)->pkt_bufs_cnt;
-
-#ifdef KERNEL
-	VERIFY((bprev != NULL || bcnt == 0) &&
-	    (bcnt < PKT_ADDR(ph)->pkt_bufs_max));
-#else /* !KERNEL */
-	if (__improbable(bcnt >= PKT_ADDR(ph)->pkt_bufs_max) ||
-	    (bprev == NULL && bcnt != 0)) {
-		return EINVAL;
-	}
-#endif /* !KERNEL */
-
-#ifdef KERNEL
-#if DEVELOPMENT || DEBUG
-	/* check if bprev is the last buflet in the chain */
-	struct __kern_buflet *pbft, *kbft;
-	int n = bcnt;
-
-	PKT_GET_FIRST_BUFLET(PKT_ADDR(ph), bcnt, pbft);
-	kbft = pbft;
-
-	while ((kbft != NULL) && n--) {
-		pbft = kbft;
-		kbft = __DECONST(struct __kern_buflet *, kbft->buf_nbft_addr);
-	}
-	ASSERT(n == 0);
-	ASSERT(bprev == pbft);
-#endif /* DEVELOPMENT || DEBUG */
-#endif /* KERNEL */
-
-	if (bprev == NULL) {
-		bprev = &PKT_ADDR(ph)->pkt_qum_buf;
-	}
-#ifdef KERNEL
-	KBUF_LINK(bprev, bnew);
-#else /* !KERNEL */
-	UBUF_LINK(bprev, bnew);
-#endif /* !KERNEL */
-
-	*(uint16_t *)(uintptr_t)&PKT_ADDR(ph)->pkt_bufs_cnt = ++bcnt;
-	return 0;
 }
 
 __attribute__((always_inline))
@@ -1015,40 +912,11 @@ __packet_get_next_buflet(const uint64_t ph, const void *bprev0)
 }
 
 __attribute__((always_inline))
-static inline uint8_t
-__packet_get_segment_count(const uint64_t ph)
-{
-	_CASSERT(sizeof(PKT_ADDR(ph)->pkt_seg_cnt == sizeof(uint8_t)));
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-
-	return PKT_ADDR(ph)->pkt_seg_cnt;
-}
-
-__attribute__((always_inline))
 static inline uint16_t
 __buflet_get_data_limit(const void *buf)
 {
 	return BLT_ADDR(buf)->buf_dlim;
 }
-
-#ifdef KERNEL
-__attribute__((always_inline))
-static inline errno_t
-__buflet_set_data_limit(const void *buf, const uint16_t dlim)
-{
-	/* buffer region is always marked as shareable */
-	ASSERT(BLT_ADDR(buf)->buf_ctl->bc_flags & SKMEM_BUFCTL_SHAREOK);
-
-	/* full bounds checking will be performed during finalize */
-	if (__probable((uint32_t)dlim <= BLT_ADDR(buf)->buf_objlim)) {
-		_CASSERT(sizeof(BLT_ADDR(buf)->buf_dlim) == sizeof(uint16_t));
-		/* deconst */
-		*(uint16_t *)(uintptr_t)&BLT_ADDR(buf)->buf_dlim = dlim;
-		return 0;
-	}
-	return ERANGE;
-}
-#endif /* KERNEL */
 
 __attribute__((always_inline))
 static inline uint16_t
@@ -1103,7 +971,7 @@ __packet_finalize(const uint64_t ph)
 		bcur = __packet_get_next_buflet(ph, bprev);
 
 #ifdef KERNEL
-		ASSERT(bcur != NULL);
+		ASSERT(bcur != NULL || bprev != NULL);
 		ASSERT(BLT_ADDR(bcur)->buf_addr != 0);
 #else  /* !KERNEL */
 		if (__improbable(bcur == NULL)) {
@@ -1543,34 +1411,32 @@ __packet_fix_hdr_sum(uint8_t *field, uint16_t *csum, uint32_t new)
 	    (uint16_t)(new & 0xffff));
 }
 
+#if KERNEL
+__attribute__((always_inlined))
+static inline errno_t
+__packet_set_buflet_count(const uint64_t ph, uint32_t bcnt)
+{
+    PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
+
+    if (QUM_ADDR(ph)->qum_pp->pp_flags & PPF_BUFFER_ON_DEMAND) {
+        if (PKT_ADDR(ph)->pkt_bufs_max > bcnt) {
+            *__DECONST(uint16_t *, PKT_ADDR(ph)->pkt_bufs_cnt) = bcnt;
+            return 0;
+        }
+
+        return EINVAL;
+    }
+
+    return ENOTSUP;
+}
+#endif
+
 __attribute__((always_inline))
 static inline void *
-__buflet_get_data_address(const void *buf)
+__buflet_get_object_address(const void *buf)
 {
 	return (void *)(BLT_ADDR(buf)->buf_addr);
 }
-
-#ifdef KERNEL
-__attribute__((always_inline))
-static inline errno_t
-__buflet_set_data_address(const void *buf, const void *addr)
-{
-	/* buffer region is always marked as shareable */
-	ASSERT(BLT_ADDR(buf)->buf_ctl->bc_flags & SKMEM_BUFCTL_SHAREOK);
-
-	/* full bounds checking will be performed during finalize */
-	if (__probable((uintptr_t)addr >=
-	    (uintptr_t)BLT_ADDR(buf)->buf_objaddr)) {
-		_CASSERT(sizeof(BLT_ADDR(buf)->buf_addr) ==
-		    sizeof(mach_vm_address_t));
-		/* deconst */
-		*(mach_vm_address_t *)(uintptr_t)&BLT_ADDR(buf)->buf_addr =
-		    (mach_vm_address_t)addr;
-		return 0;
-	}
-	return ERANGE;
-}
-#endif /* KERNEL */
 
 __attribute__((always_inline))
 static inline int
@@ -1584,7 +1450,7 @@ __buflet_set_data_offset(const void *buf, const uint16_t doff)
 	 */
 	ASSERT(BLT_ADDR(buf)->buf_dlim != 0);
 
-	if (__probable((uint32_t)doff <= BLT_ADDR(buf)->buf_objlim)) {
+	if (__probable((BLT_ADDR(buf)->buf_dlen + doff) <= BLT_ADDR(buf)->buf_dlim)) {
 		BLT_ADDR(buf)->buf_doff = doff;
 		return 0;
 	}
@@ -1607,7 +1473,7 @@ __buflet_set_data_length(const void *buf, const uint16_t dlen)
 	 */
 	ASSERT(BLT_ADDR(buf)->buf_dlim != 0);
 
-	if (__probable((uint32_t)dlen <= BLT_ADDR(buf)->buf_objlim)) {
+	if (__probable((BLT_ADDR(buf)->buf_doff + dlen) <= BLT_ADDR(buf)->buf_dlim)) {
 		BLT_ADDR(buf)->buf_dlen = dlen;
 		return 0;
 	}
@@ -1625,6 +1491,14 @@ __buflet_get_data_length(const void *buf)
 	return BLT_ADDR(buf)->buf_dlen;
 }
 
+__attribute__((always_inline))
+static inline uint32_t
+__buflet_get_object_offset(const void *buf)
+{
+	return BLT_ADDR(buf)->buf_roff;
+}
+
+
 #ifdef KERNEL
 __attribute__((always_inline))
 static inline struct sksegment *
@@ -1633,77 +1507,12 @@ __buflet_get_object_segment(const void *buf, kern_obj_idx_seg_t *idx)
 	_CASSERT(sizeof(obj_idx_t) == sizeof(kern_obj_idx_seg_t));
 
 	if (idx != NULL) {
-		*idx = BLT_ADDR(buf)->buf_ctl->bc_idx;
+		*idx = BLT_ADDR(buf)->buf_idx_seg;
 	}
 
-	return BLT_ADDR(buf)->buf_ctl->bc_slab->sl_seg;
+	return __DECONST(struct sksegment *, BLT_ADDR(buf)->buf_seg);
 }
 #endif /* KERNEL */
 
-__attribute__((always_inline))
-static inline void *
-__buflet_get_object_address(const void *buf)
-{
-#ifdef KERNEL
-	return (void *)(BLT_ADDR(buf)->buf_objaddr);
-#else /* !KERNEL */
-	/*
-	 * For user space, shared buffer is not available and hence the data
-	 * address is immutable and is always the same as the underlying
-	 * buffer object address itself.
-	 */
-	return __buflet_get_data_address(buf);
-#endif /* !KERNEL */
-}
-
-__attribute__((always_inline))
-static inline uint32_t
-__buflet_get_object_limit(const void *buf)
-{
-#ifdef KERNEL
-	return BLT_ADDR(buf)->buf_objlim;
-#else /* !KERNEL */
-	/*
-	 * For user space, shared buffer is not available and hence the data
-	 * limit is immutable and is always the same as the underlying buffer
-	 * object limit itself.
-	 */
-	return (uint32_t)__buflet_get_data_limit(buf);
-#endif /* !KERNEL */
-}
-
-__attribute__((always_inline))
-static inline packet_trace_id_t
-__packet_get_trace_id(const uint64_t ph)
-{
-	switch (SK_PTR_TYPE(ph)) {
-	case NEXUS_META_TYPE_PACKET:
-		return PKT_ADDR(ph)->pkt_trace_id;
-		break;
-	default:
-		return 0;
-	}
-}
-
-__attribute__((always_inline))
-static inline void
-__packet_set_trace_id(const uint64_t ph, packet_trace_id_t id)
-{
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-	PKT_ADDR(ph)->pkt_trace_id = id;
-}
-
-__attribute__((always_inline))
-static inline void
-__packet_trace_event(const uint64_t ph, uint32_t event)
-{
-	PKT_TYPE_ASSERT(ph, NEXUS_META_TYPE_PACKET);
-#ifdef KERNEL
-#pragma unused(event, ph)
-	KDBG(event, PKT_ADDR(ph)->pkt_trace_id);
-#else /* !KERNEL */
-	kdebug_trace(event, PKT_ADDR(ph)->pkt_trace_id, 0, 0, 0);
-#endif /* !KERNEL */
-}
 #endif /* PRIVATE || BSD_KERNEL_PRIVATE */
 #endif /* !_SKYWALK_PACKET_COMMON_H_ */

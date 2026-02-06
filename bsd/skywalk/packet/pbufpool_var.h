@@ -136,9 +136,7 @@ extern void pp_close(struct kern_pbufpool *);
 #define PPCREATEF_DYNAMIC       0x10    /* dynamic per-CPU magazines */
 
 extern struct kern_pbufpool *pp_create(const char *name,
-    struct skmem_region_params *buf_srp, struct skmem_region_params *kmd_srp,
-    struct skmem_region_params *kbft_srp, struct skmem_region_params *ubft_srp,
-    struct skmem_region_params *umd_srp, pbuf_seg_ctor_fn_t buf_seg_ctor,
+    struct skmem_region_params *srp, pbuf_seg_ctor_fn_t buf_seg_ctor,
     pbuf_seg_dtor_fn_t buf_seg_dtor, const void *ctx,
     pbuf_ctx_retain_fn_t ctx_retain, pbuf_ctx_release_fn_t ctx_release,
     uint32_t ppcreatef);
@@ -169,31 +167,21 @@ extern boolean_t pp_release_locked(struct kern_pbufpool *);
 extern boolean_t pp_release(struct kern_pbufpool *);
 
 extern void pp_regions_params_adjust(struct skmem_region_params *,
-    struct skmem_region_params *, struct skmem_region_params *,
-    struct skmem_region_params *, struct skmem_region_params *,
     nexus_meta_type_t, nexus_meta_subtype_t, uint32_t, uint16_t,
     uint32_t, uint32_t);
 
-extern uint64_t pp_alloc_packet(struct kern_pbufpool *, uint16_t, uint32_t);
+extern uint64_t pp_alloc_packet(struct kern_pbufpool *, uint32_t, uint32_t);
 extern uint64_t pp_alloc_packet_by_size(struct kern_pbufpool *, uint32_t,
     uint32_t);
-extern int pp_alloc_packet_batch(struct kern_pbufpool *, uint16_t, uint64_t *,
+extern int pp_alloc_packet_batch(struct kern_pbufpool *, uint32_t, uint64_t *,
     uint32_t *, boolean_t, alloc_cb_func_t, const void *, uint32_t);
-extern int pp_alloc_pktq(struct kern_pbufpool *, uint16_t, struct pktq *,
-    uint32_t, alloc_cb_func_t, const void *, uint32_t);
 extern void pp_free_packet(struct kern_pbufpool *, uint64_t);
 extern void pp_free_packet_batch(struct kern_pbufpool *, uint64_t *, uint32_t);
 extern void pp_free_packet_single(struct __kern_packet *);
 extern void pp_free_packet_chain(struct __kern_packet *, int *);
-extern void pp_free_pktq(struct pktq *);
 extern errno_t pp_alloc_buffer(const kern_pbufpool_t, mach_vm_address_t *,
     kern_segment_t *, kern_obj_idx_seg_t *, uint32_t);
 extern void pp_free_buffer(const kern_pbufpool_t, mach_vm_address_t);
-extern errno_t pp_alloc_buflet(struct kern_pbufpool *pp, kern_buflet_t *kbft,
-    uint32_t skmflag);
-extern errno_t pp_alloc_buflet_batch(struct kern_pbufpool *pp, uint64_t *array,
-    uint32_t *size, uint32_t skmflag);
-extern void pp_free_buflet(const kern_pbufpool_t, kern_buflet_t);
 
 extern void pp_reap_caches(boolean_t);
 __END_DECLS

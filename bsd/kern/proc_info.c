@@ -186,6 +186,7 @@ int __attribute__ ((noinline)) proc_udata_info(pid_t pid, int flavor, user_addr_
 int __attribute__ ((noinline)) pid_vnodeinfo(vnode_t vp, uint32_t vid, struct fileproc * fp, proc_t proc, int fd, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
 int __attribute__ ((noinline)) pid_vnodeinfopath(vnode_t vp, uint32_t vid, struct fileproc * fp, proc_t proc, int fd, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
 int __attribute__ ((noinline)) pid_socketinfo(socket_t so, struct fileproc *fp, proc_t proc, int fd, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
+int __attribute__ ((noinline)) pid_channelinfo(struct kern_channel *chan, struct fileproc *fp, proc_t proc, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
 int __attribute__ ((noinline)) pid_pseminfo(struct psemnode * psem, struct fileproc * fp, proc_t proc, int fd, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
 int __attribute__ ((noinline)) pid_pshminfo(struct pshmnode * pshm, struct fileproc * fp, proc_t proc, int fd, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
 int __attribute__ ((noinline)) pid_pipeinfo(struct pipe * p, struct fileproc * fp, proc_t proc, int fd, user_addr_t  buffer, uint32_t buffersize, int32_t * retval);
@@ -2578,6 +2579,28 @@ pid_kqueueinfo(struct kqueue * kq, struct fileproc *fp, proc_t proc, int fd, use
 }
 
 int
+pid_channelinfo(struct kern_channel * chan, struct fileproc *fp, proc_t proc, user_addr_t buffer, __unused uint32_t buffersize, int32_t * retval)
+{
+#if SKYWALK
+	struct channel_fdinfo channel_info;
+	int error = 0;
+
+	bzero(&channel_info, sizeof(struct channel_fdinfo));
+	fill_fileinfo(fp, proc, &channel_info.pfi);
+	if ((error = fill_channelinfo(chan, &channel_info.channelinfo)) == 0) {
+		if ((error = copyout(&channel_info, buffer, sizeof(struct channel_fdinfo))) == 0) {
+			*retval = sizeof(struct channel_fdinfo);
+		}
+	}
+	return error;
+#else
+#pragma unused(chan, fp, proc, fd, buffer)
+	*retval = 0;
+	return ENOTSUP;
+#endif
+}
+
+int
 pid_atalkinfo(__unused struct atalk * at, __unused struct fileproc *fp, __unused proc_t proc, __unused int fd, __unused user_addr_t  buffer, __unused uint32_t buffersize, __unused int32_t * retval)
 {
 	return ENOTSUP;
@@ -2623,6 +2646,9 @@ proc_pidfdinfo(int pid, int flavor, int fd, user_addr_t buffer, uint32_t buffers
 		break;
 	case PROC_PIDFDATALKINFO:
 		size = PROC_PIDFDATALKINFO_SIZE;
+		break;
+	case PROC_PIDFDCHANNELINFO:
+		size = PROC_PIDFDCHANNELINFO_SIZE;
 		break;
 
 	default:
@@ -2744,6 +2770,17 @@ proc_pidfdinfo(int pid, int flavor, int fd, user_addr_t buffer, uint32_t buffers
 			goto out1;
 		}
 		error = pid_kqueue_extinfo(p, kqu.kq, buffer, buffersize, retval);
+	}
+	break;
+
+	case PROC_PIDFDCHANNELINFO: {
+	    struct kern_channel *kch;
+
+		if ((error = fp_getfchannel(p, fd, &fp, &kch)) != 0) {
+			goto out1;
+		}
+		/* no need to be under the fdlock */
+		error = pid_channelinfo(kch, fp, p, buffer, buffersize, retval);
 	}
 	break;
 

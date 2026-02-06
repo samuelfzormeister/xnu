@@ -90,8 +90,9 @@ fsw_qos_set_pkt_dscp(struct __kern_packet *pkt, uint8_t dscp)
 
 void
 fsw_qos_mark(struct nx_flowswitch *fsw, struct flow_entry *fe,
-    struct __kern_packet *pkt)
+    struct fsw_ft_pkt *ft_pkt)
 {
+    struct __kern_packet *pkt = ft_pkt->ft_pkt_ptr;
 	struct ifnet *ifp = fsw->fsw_ifp;
 	uint8_t dscp = 0;
 
@@ -132,11 +133,6 @@ fsw_qos_mark(struct nx_flowswitch *fsw, struct flow_entry *fe,
 	case IFRTYPE_QOSMARKING_RFC4594:
 		dscp = rfc4594_sc_to_dscp(pkt->pkt_svc_class);
 		break;
-#if (DEBUG || DEVELOPMENT)
-	case IFRTYPE_QOSMARKING_CUSTOM:
-		dscp = custom_sc_to_dscp(pkt->pkt_svc_class);
-		break;
-#endif /* (DEBUG || DEVELOPMENT) */
 	default:
 		panic("%s: QoS Marking mode invalid!", if_name(ifp));
 		/* NOTREACHED */

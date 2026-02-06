@@ -30,7 +30,7 @@
 #include <skywalk/packet/pbufpool_var.h>
 #include <sys/sdt.h>
 
-static struct kern_pbufpool *pp_alloc(zalloc_flags_t);
+static struct kern_pbufpool *pp_alloc(boolean_t can_block);
 static void pp_free(struct kern_pbufpool *);
 static uint32_t pp_alloc_packet_common(struct kern_pbufpool *, uint16_t,
     uint64_t *, uint32_t, boolean_t, alloc_cb_func_t, const void *, uint32_t);
@@ -46,7 +46,7 @@ static int pp_metadata_construct(struct __kern_quantum *,
 static void pp_metadata_destruct(struct __kern_quantum *,
     struct kern_pbufpool *, boolean_t);
 static struct __kern_quantum *pp_metadata_init(struct __metadata_preamble *,
-    struct kern_pbufpool *, uint16_t, uint32_t, struct skmem_obj **);
+    struct kern_pbufpool *, uint32_t, uint32_t, struct skmem_obj **);
 static struct __metadata_preamble *pp_metadata_fini(struct __kern_quantum *,
     struct kern_pbufpool *, struct mbuf **, struct __kern_packet **,
     struct skmem_obj **);
@@ -159,7 +159,6 @@ pp_init(void)
 	_CASSERT(PKT_F_NEW_FLOW == PKTF_NEW_FLOW);
 	_CASSERT(PKT_F_START_SEQ == PKTF_START_SEQ);
 	_CASSERT(PKT_F_KEEPALIVE == PKTF_KEEPALIVE);
-	// _CASSERT(PKT_F_WAKE_PKT == PKTF_WAKE_PKT);
 	_CASSERT(PKT_F_COMMON_MASK == (PKT_F_BACKGROUND | PKT_F_REALTIME |
 	    PKT_F_REXMT | PKT_F_LAST_PKT | PKT_F_FLOW_ID | PKT_F_FLOW_ADV |
 	    PKT_F_TX_COMPL_TS_REQ | PKT_F_TS_VALID | PKT_F_NEW_FLOW |
@@ -191,8 +190,6 @@ pp_init(void)
 	 * we cast the object to struct skmem_obj.
 	 */
 	_CASSERT(offsetof(struct __metadata_preamble, _mdp_next) ==
-	    offsetof(struct skmem_obj, mo_next));
-	_CASSERT(offsetof(struct __buflet, __buflet_next) ==
 	    offsetof(struct skmem_obj, mo_next));
 
 	SK_LOCK_ASSERT_HELD();
@@ -240,10 +237,10 @@ pp_fini(void)
 static struct kern_pbufpool *
 pp_alloc(boolean_t can_block)
 {
-	/* SZ: TODO, this. */
 	struct kern_pbufpool *pp = can_block ? zalloc(pp_zone) : zalloc_noblock(pp_zone);
 
 	if (pp) {
+        bzero(pp, sizeof(*pp));
 		lck_mtx_init(&pp->pp_lock, skmem_lock_grp, skmem_lock_attr);
 	}
 	return pp;
@@ -320,10 +317,8 @@ pp_close(struct kern_pbufpool *pp)
 }
 
 void
-pp_regions_params_adjust(struct skmem_region_params *buf_srp,
-    struct skmem_region_params *kmd_srp, struct skmem_region_params *umd_srp,
-    struct skmem_region_params *kbft_srp, struct skmem_region_params *ubft_srp,
-    nexus_meta_type_t md_type, nexus_meta_subtype_t md_subtype, uint32_t md_cnt,
+pp_regions_params_adjust(struct skmem_region_params *srp, nexus_meta_type_t md_type,
+    nexus_meta_subtype_t md_subtype, uint32_t md_cnt,
     uint16_t max_frags, uint32_t buf_size, uint32_t buf_cnt)
 {
 	uint32_t md_size = 0;
@@ -346,59 +341,29 @@ pp_regions_params_adjust(struct skmem_region_params *buf_srp,
 	md_size += METADATA_PREAMBLE_SZ;
 	ASSERT(md_size >= NX_METADATA_OBJ_MIN_SZ);
 
-	umd_srp->srp_md_type = md_type;
-	umd_srp->srp_md_subtype = md_subtype;
-	umd_srp->srp_r_obj_cnt = md_cnt;
-	umd_srp->srp_r_obj_size = md_size;
-	umd_srp->srp_max_frags = max_frags;
-	skmem_region_params_config(umd_srp);
+	srp[SKMEM_REGION_MDU].srp_md_type = md_type;
+	srp[SKMEM_REGION_MDU].srp_md_subtype = md_subtype;
+	srp[SKMEM_REGION_MDU].srp_r_obj_cnt = md_cnt;
+	srp[SKMEM_REGION_MDU].srp_r_obj_size = md_size;
+	srp[SKMEM_REGION_MDU].srp_max_frags = max_frags;
+	skmem_region_params_config(&srp[SKMEM_REGION_MDU]);
 
-	kmd_srp->srp_md_type = md_type;
-	kmd_srp->srp_md_subtype = md_subtype;
-	kmd_srp->srp_r_obj_cnt = md_cnt;
-	kmd_srp->srp_r_obj_size = md_size;
-	kmd_srp->srp_max_frags = max_frags;
-	skmem_region_params_config(kmd_srp);
+	srp[SKMEM_REGION_MDK].srp_md_type = md_type;
+	srp[SKMEM_REGION_MDK].srp_md_subtype = md_subtype;
+	srp[SKMEM_REGION_MDK].srp_r_obj_cnt = md_cnt;
+	srp[SKMEM_REGION_MDK].srp_r_obj_size = md_size;
+	srp[SKMEM_REGION_MDK].srp_max_frags = max_frags;
+	skmem_region_params_config(&srp[SKMEM_REGION_MDK]);
 
-	buf_srp->srp_r_obj_cnt = MAX(buf_cnt, kmd_srp->srp_c_obj_cnt);
-	buf_srp->srp_r_obj_size = buf_size;
-	buf_srp->srp_cflags &=
+	srp[SKMEM_REGION_BUF].srp_r_obj_cnt = MAX(buf_cnt, srp[SKMEM_REGION_MDK].srp_c_obj_cnt);
+	srp->srp_r_obj_size = buf_size;
+	srp->srp_cflags &=
 	    ~(SKMEM_REGION_CR_MONOLITHIC | SKMEM_REGION_CR_PERSISTENT);
-	skmem_region_params_config(buf_srp);
-
-	if (kbft_srp != NULL) {
-		ASSERT(md_type == NEXUS_META_TYPE_PACKET);
-
-		/*
-		 * Ideally we want the number of buflets to be
-		 * "kmd_srp->srp_c_obj_cnt * (kmd_srp->srp_max_frags - 1)",
-		 * so that we have enough buflets when multi-buflet and
-		 * shared buffer object is used.
-		 * Currently multi-buflet is being used only by user pool
-		 * which doesn't support shared buffer object, hence to reduce
-		 * the number of objects we are restricting the number of
-		 * buflets to the number of buffers.
-		 */
-		kbft_srp->srp_r_obj_cnt = buf_srp->srp_c_obj_cnt;
-		kbft_srp->srp_r_obj_size = MAX(sizeof(struct __kern_buflet_ext),
-		    sizeof(struct __user_buflet));
-		kbft_srp->srp_cflags = kmd_srp->srp_cflags;
-		skmem_region_params_config(kbft_srp);
-		ASSERT(kbft_srp->srp_c_obj_cnt >= buf_srp->srp_c_obj_cnt);
-	}
-
-	if (ubft_srp != NULL) {
-		ASSERT(kbft_srp != NULL);
-		ubft_srp->srp_r_obj_cnt = kbft_srp->srp_r_obj_cnt;
-		ubft_srp->srp_r_obj_size = kbft_srp->srp_r_obj_size;
-		ubft_srp->srp_cflags = umd_srp->srp_cflags;
-		skmem_region_params_config(ubft_srp);
-		ASSERT(kbft_srp->srp_c_obj_cnt == ubft_srp->srp_c_obj_cnt);
-	}
+	skmem_region_params_config(&srp[SKMEM_REGION_BUF]);
 
 	/* make sure each metadata can be paired with a buffer */
-	ASSERT(kmd_srp->srp_c_obj_cnt == umd_srp->srp_c_obj_cnt);
-	ASSERT(kmd_srp->srp_c_obj_cnt <= buf_srp->srp_c_obj_cnt);
+	ASSERT(srp[SKMEM_REGION_MDK].srp_c_obj_cnt == srp[SKMEM_REGION_MDU].srp_c_obj_cnt);
+	ASSERT(srp[SKMEM_REGION_MDK].srp_c_obj_cnt <= srp[SKMEM_REGION_BUF].srp_c_obj_cnt);
 }
 
 SK_NO_INLINE_ATTRIBUTE
@@ -478,8 +443,7 @@ pp_metadata_construct(struct __kern_quantum *kqum, struct __user_quantum *uqum,
 			if (__improbable(baddr == 0)) {
 				goto fail;
 			}
-			KBUF_CTOR(kbuf, baddr, SKMEM_OBJ_IDX_REG(&oib),
-			    SKMEM_OBJ_BUFCTL(&oib), pp);
+			KBUF_CTOR(kbuf, baddr, SKMEM_OBJ_IDX_REG(&oib), pp);
 			baddr = 0;
 		} else {
 			/*
@@ -498,7 +462,6 @@ pp_metadata_construct(struct __kern_quantum *kqum, struct __user_quantum *uqum,
 			blistn = (*blist)->mo_next;
 			(*blist)->mo_next = NULL;
 
-			KBUF_EXT_INIT(kbuf, pp);
 			KBUF_LINK(pkbuf, kbuf);
 			*blist = blistn;
 		}
@@ -593,14 +556,14 @@ pp_metadata_ctor_common(struct skmem_obj_info *oi0,
 
 	/* allocate (constructed) buflet(s) with buffer(s) attached */
 	if (PP_HAS_BUFFER_ON_DEMAND(pp) && bufcnt != 0) {
-		(void) skmem_cache_batch_alloc(pp->pp_kbft_cache, &blist,
+		(void) skmem_cache_batch_alloc(pp->pp_buf_cache, &blist,
 		    bufcnt, skmflag);
 	}
 
 	error = pp_metadata_construct(kqum, uqum, SKMEM_OBJ_IDX_REG(oi), pp,
 	    skmflag, bufcnt, TRUE, &blist);
 	if (__improbable(blist != NULL)) {
-		skmem_cache_batch_free(pp->pp_kbft_cache, blist);
+		skmem_cache_batch_free(pp->pp_buf_cache, blist);
 		blist = NULL;
 	}
 	return error;
@@ -1014,7 +977,7 @@ pp_create(const char *name, struct skmem_region_params *buf_srp,
 	}
 
 	if (PP_HAS_BUFFER_ON_DEMAND(pp)) {
-		if ((pp->pp_kbft_region = skmem_region_create(name,
+		if ((pp->pp_buf_region = skmem_region_create(name,
 		    kbft_srp, NULL, NULL, NULL)) == NULL) {
 			SK_ERR("\"%s\" (0x%llx) failed to create %s region",
 			    pp->pp_name, SK_KVA(pp), kbft_srp->srp_name);
@@ -1608,7 +1571,7 @@ pp_isempty_upp(struct kern_pbufpool *pp)
 __attribute__((always_inline))
 static inline struct __kern_quantum *
 pp_metadata_init(struct __metadata_preamble *mdp, struct kern_pbufpool *pp,
-    uint16_t bufcnt, uint32_t skmflag, struct skmem_obj **blist)
+    uint32_t bufcnt, uint32_t skmflag, struct skmem_obj **blist)
 {
 	struct __kern_quantum *kqum;
 	struct __user_quantum *uqum;
@@ -1713,12 +1676,12 @@ pp_alloc_packet_common(struct kern_pbufpool *pp, uint16_t bufcnt,
 	ASSERT(PP_BATCH_CAPABLE(pp));
 
 	/* allocate (constructed) packet(s) with buffer(s) attached */
-	allocp = skmem_cache_batch_alloc(pp->pp_kmd_cache, &plist, num,
+	allocp = skmem_cache_batch_alloc(pp->pp_mdk_cache, &plist, num,
 	    skmflag);
 
 	/* allocate (constructed) buflet(s) with buffer(s) attached */
 	if (PP_HAS_BUFFER_ON_DEMAND(pp) && bufcnt != 0 && allocp != 0) {
-		(void) skmem_cache_batch_alloc(pp->pp_kbft_cache, &blist,
+		(void) skmem_cache_batch_alloc(pp->pp_buf_cache, &blist,
 		    (allocp * bufcnt), skmflag);
 	}
 
@@ -1732,12 +1695,12 @@ pp_alloc_packet_common(struct kern_pbufpool *pp, uint16_t bufcnt,
 		kqum = pp_metadata_init(mdp, pp, bufcnt, skmflag, &blist);
 		if (kqum == NULL) {
 			if (blist != NULL) {
-				skmem_cache_batch_free(pp->pp_kbft_cache,
+				skmem_cache_batch_free(pp->pp_buf_cache,
 				    blist);
 				blist = NULL;
 			}
 			plist->mo_next = plistn;
-			skmem_cache_batch_free(pp->pp_kmd_cache, plist);
+			skmem_cache_batch_free(pp->pp_mdk_cache, plist);
 			plist = NULL;
 			break;
 		}
@@ -1766,7 +1729,7 @@ pp_alloc_packet_common(struct kern_pbufpool *pp, uint16_t bufcnt,
 }
 
 uint64_t
-pp_alloc_packet(struct kern_pbufpool *pp, uint16_t bufcnt, uint32_t skmflag)
+pp_alloc_packet(struct kern_pbufpool *pp, uint32_t bufcnt, uint32_t skmflag)
 {
 	uint64_t kpkt = 0;
 
@@ -1777,7 +1740,7 @@ pp_alloc_packet(struct kern_pbufpool *pp, uint16_t bufcnt, uint32_t skmflag)
 }
 
 int
-pp_alloc_packet_batch(struct kern_pbufpool *pp, uint16_t bufcnt,
+pp_alloc_packet_batch(struct kern_pbufpool *pp, uint32_t bufcnt,
     uint64_t *array, uint32_t *size, boolean_t tagged, alloc_cb_func_t cb,
     const void *ctx, uint32_t skmflag)
 {
@@ -1799,78 +1762,6 @@ pp_alloc_packet_batch(struct kern_pbufpool *pp, uint16_t bufcnt,
 		err = EAGAIN;
 	} else {
 		err = ENOMEM;
-	}
-
-	return err;
-}
-
-int
-pp_alloc_pktq(struct kern_pbufpool *pp, uint16_t bufcnt,
-    struct pktq *pktq, uint32_t num, alloc_cb_func_t cb, const void *ctx,
-    uint32_t skmflag)
-{
-	struct __metadata_preamble *mdp;
-	struct __kern_packet *kpkt = NULL;
-	uint32_t allocp, need = num;
-	struct skmem_obj *plist, *blist = NULL;
-	int err;
-
-	ASSERT(pktq != NULL && num > 0);
-	ASSERT(pp->pp_md_type == NEXUS_META_TYPE_PACKET);
-	ASSERT(bufcnt <= pp->pp_max_frags);
-	ASSERT(PP_BATCH_CAPABLE(pp));
-
-	/* allocate (constructed) packet(s) with buffer(s) attached */
-	allocp = skmem_cache_batch_alloc(pp->pp_kmd_cache, &plist, num,
-	    skmflag);
-
-	/* allocate (constructed) buflet(s) with buffer(s) attached */
-	if (PP_HAS_BUFFER_ON_DEMAND(pp) && bufcnt != 0 && allocp != 0) {
-		(void) skmem_cache_batch_alloc(pp->pp_kbft_cache, &blist,
-		    (allocp * bufcnt), skmflag);
-	}
-
-	while (plist != NULL) {
-		struct skmem_obj *plistn;
-
-		plistn = plist->mo_next;
-		plist->mo_next = NULL;
-
-		mdp = (struct __metadata_preamble *)(void *)plist;
-		kpkt = (struct __kern_packet *)pp_metadata_init(mdp, pp,
-		    bufcnt, skmflag, &blist);
-		if (kpkt == NULL) {
-			if (blist != NULL) {
-				skmem_cache_batch_free(pp->pp_kbft_cache,
-				    blist);
-				blist = NULL;
-			}
-			plist->mo_next = plistn;
-			skmem_cache_batch_free(pp->pp_kmd_cache, plist);
-			plist = NULL;
-			break;
-		}
-
-		KPKTQ_ENQUEUE(pktq, kpkt);
-
-		if (cb != NULL) {
-			(cb)((uint64_t)kpkt, (num - need), ctx);
-		}
-
-		plist = plistn;
-
-		ASSERT(need > 0);
-		--need;
-	}
-	ASSERT(blist == NULL);
-	ASSERT((num - need) == allocp || kpkt == NULL);
-
-	if (__probable(need == 0)) {
-		err = 0;
-	} else if (need == num) {
-		err = ENOMEM;
-	} else {
-		err = EAGAIN;
 	}
 
 	return err;

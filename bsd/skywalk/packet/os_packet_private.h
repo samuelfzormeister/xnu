@@ -239,27 +239,17 @@ struct __flow {
 /*
  * Common buflet structure shared by {__user,__kern}_buflet.
  */
-struct __buflet {
-	union {
-		/* for skmem batch alloc/free */
-		uint64_t __buflet_next;
-		/* address of next buflet in chain */
-		const mach_vm_address_t __nbft_addr;
-	};
+ struct __buflet {
 	/* buffer data address */
-	const mach_vm_address_t __baddr;
+	const mach_vm_address_t __addr;
 	/* index of buflet object in the owning buflet region */
-	const obj_idx_t __bft_idx;
+	const obj_idx_t __idx;
 	/* buffer object index in buffer region */
-	const obj_idx_t __bidx;
-	/* object index in buflet region of next buflet(for buflet chaining) */
-	const obj_idx_t __nbft_idx;
 	const uint16_t  __dlim;         /* maximum length */
 	uint16_t        __dlen;         /* length of data in buflet */
 	uint16_t        __doff;         /* offset of data in buflet */
-	const uint16_t  __flag;
-#define BUFLET_FLAG_EXTERNAL    0x0001
-} __attribute((packed));
+	uint16_t        __qoff;         /* offset of the quantum that the buflet originated from */
+ } __attribute((packed));
 
 /*
  * A buflet represents the smallest buffer fragment representing
@@ -273,15 +263,13 @@ struct __user_buflet {
 	 * Common area between user and kernel variants.
 	 */
 	struct __buflet buf_com;
-#define buf_addr        buf_com.__baddr
-#define buf_nbft_addr   buf_com.__nbft_addr
-#define buf_idx         buf_com.__bidx
-#define buf_nbft_idx    buf_com.__nbft_idx
+#define buf_addr        buf_com.__addr
+#define buf_idx         buf_com.__idx
 #define buf_dlim        buf_com.__dlim
 #define buf_dlen        buf_com.__dlen
 #define buf_doff        buf_com.__doff
+#define buf_qoff        buf_com.__qoff
 #define buf_flag        buf_com.__flag
-#define buf_bft_idx_reg buf_com.__bft_idx
 };
 
 #define BUF_BADDR(_buf, _addr)                                              \
@@ -291,35 +279,20 @@ struct __user_buflet {
 #define BUF_BIDX(_buf, _idx)                                                \
 	*__DECONST(obj_idx_t *, &(_buf)->buf_idx) = (obj_idx_t)(_idx)
 
-#define BUF_NBFT_ADDR(_buf, _addr)                                          \
-	*__DECONST(mach_vm_address_t *, &(_buf)->buf_nbft_addr) =           \
-	(mach_vm_address_t)(_addr)
-
-#define BUF_NBFT_IDX(_buf, _idx)                                            \
-	*__DECONST(obj_idx_t *, &(_buf)->buf_nbft_idx) = (obj_idx_t)(_idx)
-
-#define BUF_BFT_IDX_REG(_buf, _idx)    \
-	*__DECONST(obj_idx_t *, &(_buf)->buf_bft_idx_reg) = (_idx)
-
 #define UBUF_LINK(_pubft, _ubft) do {                                   \
 	ASSERT((_ubft) != NULL);                                        \
-	BUF_NBFT_ADDR(_pubft, _ubft);                                   \
-	BUF_NBFT_IDX(_pubft, (_ubft)->buf_bft_idx_reg);                 \
 } while (0)
 
 #ifdef KERNEL
-#define BUF_CTOR(_buf, _baddr, _bidx, _dlim, _dlen, _doff, _nbaddr, _nbidx, _bflag) do {  \
+#define BUF_CTOR(_buf, _baddr, _bidx, _dlim, _dlen, _doff) do {        \
 	_CASSERT(sizeof ((_buf)->buf_addr) == sizeof (mach_vm_address_t)); \
 	_CASSERT(sizeof ((_buf)->buf_idx) == sizeof (obj_idx_t));       \
 	_CASSERT(sizeof ((_buf)->buf_dlim) == sizeof (uint16_t));       \
 	BUF_BADDR(_buf, _baddr);                                        \
-	BUF_NBFT_ADDR(_buf, _nbaddr);                                   \
 	BUF_BIDX(_buf, _bidx);                                          \
-	BUF_NBFT_IDX(_buf, _nbidx);                                     \
 	*(uint16_t *)(uintptr_t)&(_buf)->buf_dlim = (_dlim);            \
 	(_buf)->buf_dlen = (_dlen);                                     \
 	(_buf)->buf_doff = (_doff);                                     \
-	*(uint16_t *)(uintptr_t)&(_buf)->buf_flag = (_bflag);           \
 } while (0)
 
 #define BUF_INIT(_buf, _dlen, _doff) do {                               \
@@ -331,10 +304,7 @@ struct __user_buflet {
 
 #ifdef KERNEL
 #define BUF_IN_RANGE(_buf)                                              \
-	((_buf)->buf_addr >= (mach_vm_address_t)(_buf)->buf_objaddr &&  \
-	((uintptr_t)(_buf)->buf_addr + (_buf)->buf_dlim) <=             \
-	((uintptr_t)(_buf)->buf_objaddr + (_buf)->buf_objlim) &&        \
-	((_buf)->buf_doff + (_buf)->buf_dlen) <= (_buf)->buf_dlim)
+	(((_buf)->buf_doff + (_buf)->buf_dlen) <= (_buf)->buf_dlim)
 #else /* !KERNEL */
 #define BUF_IN_RANGE(_buf)                                              \
 	(((_buf)->buf_doff + (_buf)->buf_dlen) <= (_buf)->buf_dlim)
@@ -454,8 +424,7 @@ struct __user_quantum {
 	(_kqum)->qum_len = (_len);                                           \
 	_CASSERT(sizeof(METADATA_IDX(_kqum)) == sizeof(obj_idx_t));          \
 	*(obj_idx_t *)(uintptr_t)&METADATA_IDX(_kqum) = (_qidx);             \
-	BUF_CTOR(&(_kqum)->qum_buf[0], (_baddr), (_bidx), (_dlim), 0, 0, 0,  \
-	    OBJ_IDX_NONE, 0);                                                \
+	BUF_CTOR(&(_kqum)->qum_buf[0], (_baddr), (_bidx), (_dlim));          \
 } while (0)
 
 #define _KQUM_INIT(_kqum, _flags, _len, _qidx) do {                          \
@@ -707,7 +676,7 @@ struct __user_packet {
 /*                              0x0000000000000080ULL    (reserved) */
 /*                              0x0000000000000100ULL    (reserved) */
 /*                              0x0000000000000200ULL    (reserved) */
-#define PKT_F_WAKE_PKT          0x0000000000000400ULL /* (U+K) */
+/*                              0x0000000000000400ULL    (reserved) */
 /*                              0x0000000000000800ULL    (reserved) */
 /*                              0x0000000000001000ULL    (reserved) */
 /*                              0x0000000000002000ULL    (reserved) */
@@ -778,7 +747,7 @@ struct __user_packet {
 #define PKT_F_USER_MASK                                                 \
 	(PKT_F_BACKGROUND | PKT_F_REALTIME | PKT_F_REXMT |              \
 	PKT_F_LAST_PKT | PKT_F_OPT_DATA | PKT_F_PROMISC |               \
-	PKT_F_TRUNCATED | PKT_F_WAKE_PKT)
+	PKT_F_TRUNCATED)
 
 /*
  * Aliases for kernel-only flags.  See notes above.  The ones marked
@@ -824,7 +793,7 @@ struct __user_packet {
 	(PKT_F_BACKGROUND | PKT_F_REALTIME | PKT_F_REXMT |              \
 	PKT_F_LAST_PKT | PKT_F_FLOW_ID | PKT_F_FLOW_ADV |               \
 	PKT_F_TX_COMPL_TS_REQ | PKT_F_TS_VALID | PKT_F_NEW_FLOW |       \
-	PKT_F_START_SEQ | PKT_F_KEEPALIVE | PKT_F_WAKE_PKT)
+	PKT_F_START_SEQ | PKT_F_KEEPALIVE)
 
 /*
  * Flags retained across alloc/free.

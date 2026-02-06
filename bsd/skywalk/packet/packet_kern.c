@@ -29,9 +29,6 @@
 #include <skywalk/os_skywalk_private.h>
 #include <netinet/tcp_var.h>
 
-static int kern_packet_clone_internal(const kern_packet_t, kern_packet_t *,
-    uint32_t, kern_packet_copy_mode_t);
-
 #if (DEBUG || DEVELOPMENT)
 __attribute__((noreturn))
 void
@@ -216,36 +213,6 @@ kern_packet_get_service_class_index(const kern_packet_svc_class_t svc,
 	return 0;
 }
 
-boolean_t
-kern_packet_is_high_priority(const kern_packet_t ph)
-{
-	uint32_t sc;
-	boolean_t is_hi_priority;
-
-	sc = __packet_get_service_class(ph);
-
-	switch (sc) {
-	case PKT_SC_VI:
-	case PKT_SC_SIG:
-	case PKT_SC_VO:
-	case PKT_SC_CTL:
-		is_hi_priority = (PKT_ADDR(ph)->pkt_comp_gencnt == 0 ||
-		    PKT_ADDR(ph)->pkt_comp_gencnt == TCP_ACK_COMPRESSION_DUMMY);
-		break;
-
-	case PKT_SC_BK_SYS:
-	case PKT_SC_BK:
-	case PKT_SC_BE:
-	case PKT_SC_RD:
-	case PKT_SC_OAM:
-	case PKT_SC_AV:
-	case PKT_SC_RV:
-	default:
-		is_hi_priority = false;
-	}
-	return is_hi_priority;
-}
-
 errno_t
 kern_packet_set_traffic_class(const kern_packet_t ph,
     kern_packet_traffic_class_t tc)
@@ -324,6 +291,12 @@ uint32_t
 kern_packet_get_data_length(const kern_packet_t ph)
 {
 	return __packet_get_data_length(ph);
+}
+
+errno_t
+kern_packet_set_buflet_count(const kern_packet_t ph, uint32_t bcnt)
+{
+    return __packet_set_buflet_count(ph, bcnt);
 }
 
 uint32_t
@@ -523,18 +496,20 @@ kern_copy_and_inet_checksum(const void *src, void *dst, uint32_t len,
 }
 
 /*
- * Source packet must be finalized (not dropped); cloned packet does not
- * inherit the finalized flag, or the classified flag, so caller is
- * responsible for finalizing it and classifying it (as needed).
+ * Source packet must be finalized (not dropped);
+ *
+ * Also, the cloned packet is finalized. For some reason.
  */
-static int
-kern_packet_clone_internal(const kern_packet_t ph1, kern_packet_t *ph2,
-    uint32_t skmflag, kern_packet_copy_mode_t mode)
+kern_packet_t
+kern_packet_clone(const kern_packet_t ph1, uint32_t skmflag)
 {
-	struct kern_pbufpool *pool;
+    struct kern_pbufpool *pool;
 	struct __kern_packet *p1 = SK_PTR_ADDR_KPKT(ph1);
 	struct __kern_packet *p2 = NULL;
 	struct __kern_buflet *p1_buf, *p2_buf;
+	uint8_t *saddr, *daddr;
+	uint16_t copy_len;
+	kern_packet_t ph2;
 	uint16_t bufs_cnt_alloc;
 	int m_how;
 	int err;
@@ -552,49 +527,14 @@ kern_packet_clone_internal(const kern_packet_t ph1, kern_packet_t *ph2,
 	/* TODO: Add multi-buflet support */
 	VERIFY(p1->pkt_bufs_cnt == 1);
 
-	switch (mode) {
-	case KPKT_COPY_HEAVY:
-		/*
-		 * Allocate a packet with the same number of buffers as that
-		 * of the source packet's; this cannot be 0 per check above.
-		 */
-		bufs_cnt_alloc = p1->pkt_bufs_cnt;
-		break;
+	bufs_cnt_alloc = p1->pkt_bufs_cnt;
 
-	case KPKT_COPY_LIGHT:
-		/*
-		 * Allocate an "empty" packet with no buffers attached; this
-		 * will work only on pools marked with "on-demand", which is
-		 * the case today for device drivers needing shared buffers
-		 * support.
-		 *
-		 * TODO: We could make this generic and applicable to regular
-		 * pools, but it would involve detaching the buffer that comes
-		 * attached to the constructed packet; this wouldn't be that
-		 * lightweight in nature, but whatever.  In such a case the
-		 * number of buffers requested during allocation is the same
-		 * as the that of the source packet's.  For now, let it fail
-		 * naturally on regular pools, as part of allocation below.
-		 *
-		 * XXX: This would also fail on quantums as we currently
-		 * restrict quantums to have exactly one buffer.
-		 */
-		bufs_cnt_alloc = 0;
-		break;
-
-	default:
-		VERIFY(0);
-		/* NOTREACHED */
-		__builtin_unreachable();
-	}
-
-	*ph2 = 0;
 	pool = __DECONST(struct kern_pbufpool *, SK_PTR_ADDR_KQUM(ph1)->qum_pp);
 	if (skmflag & SKMEM_NOSLEEP) {
-		err = kern_pbufpool_alloc_nosleep(pool, bufs_cnt_alloc, ph2);
+		err = kern_pbufpool_alloc_nosleep(pool, bufs_cnt_alloc, &ph2);
 		m_how = M_NOWAIT;
 	} else {
-		err = kern_pbufpool_alloc(pool, bufs_cnt_alloc, ph2);
+		err = kern_pbufpool_alloc(pool, bufs_cnt_alloc, &ph2);
 		ASSERT(err != ENOMEM);
 		m_how = M_WAIT;
 	}
@@ -602,186 +542,66 @@ kern_packet_clone_internal(const kern_packet_t ph1, kern_packet_t *ph2,
 		/* See comments above related to KPKT_COPY_{HEAVY,LIGHT} */
 		goto error;
 	}
-	p2 = SK_PTR_ADDR_KPKT(*ph2);
+	p2 = SK_PTR_ADDR_KPKT(p2);
 
 	/* Copy packet metadata */
 	_QUM_COPY(&(p1)->pkt_qum, &(p2)->pkt_qum);
 	_PKT_COPY(p1, p2);
 	ASSERT(p2->pkt_mbuf == NULL);
-	ASSERT(p2->pkt_bufs_max == p1->pkt_bufs_max);
 
-	/* clear trace id */
-	p2->pkt_trace_id = 0;
+	/* Copy AQM metadata */
+	p2->pkt_flowsrc_type = p1->pkt_flowsrc_type;
+	p2->pkt_flowsrc_fidx = p1->pkt_flowsrc_fidx;
+	_CASSERT((offsetof(struct __flow, flow_src_id) % 8) == 0);
+	_UUID_COPY(p2->pkt_flowsrc_id, p1->pkt_flowsrc_id);
+	_UUID_COPY(p2->pkt_policy_euuid, p1->pkt_policy_euuid);
+	p2->pkt_policy_id = p1->pkt_policy_id;
+
+	ASSERT(p1->pkt_bufs_cnt == 1);
+
 	/* clear finalized and classified bits from clone */
 	p2->pkt_qum.qum_qflags &= ~(QUM_F_FINALIZED | QUM_F_FLOW_CLASSIFIED);
 
-	switch (mode) {
-	case KPKT_COPY_HEAVY:
-		/*
-		 * Heavy: Copy buffer contents and extra metadata.
-		 */
-		ASSERT(p2->pkt_bufs_cnt == p1->pkt_bufs_cnt);
-		if (__probable(p1->pkt_bufs_cnt != 0)) {
-			uint8_t *saddr, *daddr;
-			uint16_t copy_len;
-			/*
-			 * TODO -- wshen0123@apple.com
-			 * Packets from compat driver could have dlen > dlim
-			 * for flowswitch flow compatibility, cleanup when we
-			 * make them consistent.
-			 */
-			PKT_GET_FIRST_BUFLET(p1, p1->pkt_bufs_cnt, p1_buf);
-			PKT_GET_FIRST_BUFLET(p2, p2->pkt_bufs_cnt, p2_buf);
-			saddr = (void *)p1_buf->buf_addr;
-			daddr = (void *)p2_buf->buf_addr;
-			copy_len = MIN(p1_buf->buf_dlen, p1_buf->buf_dlim);
-			if (copy_len != 0) {
-				bcopy(saddr, daddr, copy_len);
-			}
-			*__DECONST(uint16_t *, &p2_buf->buf_dlim) =
-			    p1_buf->buf_dlim;
-			p2_buf->buf_dlen = p1_buf->buf_dlen;
-			p2_buf->buf_doff = p1_buf->buf_doff;
-		}
-
-		/* Copy AQM metadata */
-		p2->pkt_flowsrc_type = p1->pkt_flowsrc_type;
-		p2->pkt_flowsrc_fidx = p1->pkt_flowsrc_fidx;
-		_CASSERT((offsetof(struct __flow, flow_src_id) % 8) == 0);
-		_UUID_COPY(p2->pkt_flowsrc_id, p1->pkt_flowsrc_id);
-		_UUID_COPY(p2->pkt_policy_euuid, p1->pkt_policy_euuid);
-		p2->pkt_policy_id = p1->pkt_policy_id;
-
-		p2->pkt_pflags = p1->pkt_pflags;
-		if (p1->pkt_pflags & PKT_F_MBUF_DATA) {
-			ASSERT(p1->pkt_mbuf != NULL);
-			p2->pkt_mbuf = m_dup(p1->pkt_mbuf, m_how);
-			if (p2->pkt_mbuf == NULL) {
-				KPKT_CLEAR_MBUF_DATA(p2);
-				err = ENOBUFS;
-				goto error;
-			}
-		}
-		break;
-
-	case KPKT_COPY_LIGHT:
-		/*
-		 * Lightweight: Duplicate buflet(s) and add refs.
-		 */
-		ASSERT(p1->pkt_mbuf == NULL);
-		ASSERT(p2->pkt_bufs_cnt == 0);
-		if (__probable(p1->pkt_bufs_cnt != 0)) {
-			PKT_GET_FIRST_BUFLET(p1, p1->pkt_bufs_cnt, p1_buf);
-			p2_buf = &p2->pkt_qum_buf;
-			*__DECONST(uint16_t *, &p2->pkt_bufs_cnt) =
-			    p1->pkt_bufs_cnt;
-			_KBUF_COPY(p1_buf, p2_buf);
-			ASSERT(p2_buf->buf_nbft_addr == 0);
-			ASSERT(p2_buf->buf_nbft_idx == OBJ_IDX_NONE);
-		}
-		ASSERT(p2->pkt_bufs_cnt == p1->pkt_bufs_cnt);
-		ASSERT(p2->pkt_bufs_max == p1->pkt_bufs_max);
-		ASSERT(err == 0);
-		break;
+	if (METADATA_TYPE(p2) == NEXUS_META_TYPE_PACKET) {
+		PKT_GET_FIRST_BUFLET(p1, p1->pkt_bufs_cnt, p1_buf);
+		PKT_GET_FIRST_BUFLET(p2, p2->pkt_bufs_cnt, p2_buf);
+	} else {
+	    ASSERT(METADATA_TYPE(p2) == NEXUS_META_TYPE_QUANTUM);
+		p1_buf = &p1->pkt_qum_buf;
+		p2_buf = &p2->pkt_qum_buf;
 	}
 
-error:
+	saddr = (void *)p1_buf->buf_addr;
+	daddr = (void *)p2_buf->buf_addr;
+	copy_len = MIN(p1_buf->buf_dlen, p1_buf->buf_dlim);
+	*__DECONST(uint16_t *, &p2_buf->buf_dlim) = p1_buf->buf_dlim;
+	p2_buf->buf_dlen = p1_buf->buf_dlen;
+	p2_buf->buf_doff = p1_buf->buf_doff;
+
+	p2->pkt_pflags = p1->pkt_pflags;
+	if (p1->pkt_pflags & PKT_F_MBUF_DATA) {
+		ASSERT(p1->pkt_mbuf != NULL);
+		p2->pkt_mbuf = m_dup(p1->pkt_mbuf, m_how);
+		if (p2->pkt_mbuf == NULL) {
+			KPKT_CLEAR_MBUF_DATA(p2);
+			err = ENOBUFS;
+			goto error;
+		}
+	}
+
+	/* SAMUEL ZORMEISTER: lovely. */
+	err = __packet_finalize(ph2);
+
+   error:
 	if (err != 0 && p2 != NULL) {
-		uint32_t usecnt = 0;
-
 		ASSERT(p2->pkt_mbuf == NULL);
-		if (__probable(mode == KPKT_COPY_LIGHT)) {
-			/*
-			 * This is undoing what _KBUF_COPY() did earlier,
-			 * in case this routine is modified to handle regular
-			 * pool (not on-demand), which also decrements the
-			 * shared buffer's usecnt.  For regular pool, calling
-			 * kern_pubfpool_free() will not yield a call to
-			 * destroy the metadata.
-			 */
-			PKT_GET_FIRST_BUFLET(p2, p2->pkt_bufs_cnt, p2_buf);
-			KBUF_DTOR(p2_buf, usecnt);
-		}
-		kern_pbufpool_free(pool, *ph2);
-		*ph2 = 0;
+		kern_pbufpool_free(pool, ph2);
+		ph2 = 0;
 	}
 
-	return err;
-}
+	ASSERT(err == 0);
 
-errno_t
-kern_packet_clone(const kern_packet_t ph1, kern_packet_t *ph2,
-    kern_packet_copy_mode_t mode)
-{
-	return kern_packet_clone_internal(ph1, ph2, 0, mode);
-}
-
-errno_t
-kern_packet_clone_nosleep(const kern_packet_t ph1, kern_packet_t *ph2,
-    kern_packet_copy_mode_t mode)
-{
-	return kern_packet_clone_internal(ph1, ph2, SKMEM_NOSLEEP, mode);
-}
-
-errno_t
-kern_packet_add_buflet(const kern_packet_t ph, const kern_buflet_t bprev,
-    const kern_buflet_t bnew)
-{
-	return __packet_add_buflet(ph, bprev, bnew);
-}
-
-void
-kern_packet_append(const kern_packet_t ph1, const kern_packet_t ph2)
-{
-	/*
-	 * TODO:
-	 * Add assert for non-zero ph2 here after changing IOSkywalkFamily
-	 * to use kern_packet_set_next() for clearing the next pointer.
-	 */
-	kern_packet_set_next(ph1, ph2);
-}
-
-kern_packet_t
-kern_packet_get_next(const kern_packet_t ph)
-{
-	struct __kern_packet *p, *next;
-
-	p = SK_PTR_ADDR_KPKT(ph);
-	next = p->pkt_nextpkt;
-	return next == NULL ? 0 : SK_PKT2PH(next);
-}
-
-void
-kern_packet_set_next(const kern_packet_t ph1, const kern_packet_t ph2)
-{
-	struct __kern_packet *p1, *p2;
-
-	ASSERT(ph1 != 0);
-	p1 = SK_PTR_ADDR_KPKT(ph1);
-	p2 = (ph2 == 0 ? NULL : SK_PTR_ADDR_KPKT(ph2));
-	p1->pkt_nextpkt = p2;
-}
-
-void
-kern_packet_set_chain_counts(const kern_packet_t ph, uint32_t count,
-    uint32_t bytes)
-{
-	struct __kern_packet *p;
-
-	p = SK_PTR_ADDR_KPKT(ph);
-	p->pkt_chain_count = count;
-	p->pkt_chain_bytes = bytes;
-}
-
-void
-kern_packet_get_chain_counts(const kern_packet_t ph, uint32_t *count,
-    uint32_t *bytes)
-{
-	struct __kern_packet *p;
-
-	p = SK_PTR_ADDR_KPKT(ph);
-	*count = p->pkt_chain_count;
-	*bytes = p->pkt_chain_bytes;
+	return ph2;
 }
 
 errno_t
@@ -814,29 +634,17 @@ kern_buflet_get_object_address(const kern_buflet_t buf)
 	return __buflet_get_object_address(buf);
 }
 
-uint32_t
-kern_buflet_get_object_limit(const kern_buflet_t buf)
-{
-	return __buflet_get_object_limit(buf);
-}
-
-void *
-kern_buflet_get_data_address(const kern_buflet_t buf)
-{
-	return __buflet_get_data_address(buf);
-}
-
-errno_t
-kern_buflet_set_data_address(const kern_buflet_t buf, const void *daddr)
-{
-	return __buflet_set_data_address(buf, daddr);
-}
-
 kern_segment_t
 kern_buflet_get_object_segment(const kern_buflet_t buf,
     kern_obj_idx_seg_t *idx)
 {
 	return __buflet_get_object_segment(buf, idx);
+}
+
+mach_vm_offset_t
+kern_buflet_get_object_offset(const kern_buflet_t buf)
+{
+    return __buflet_get_object_offset(buf);
 }
 
 uint16_t
@@ -845,57 +653,10 @@ kern_buflet_get_data_limit(const kern_buflet_t buf)
 	return __buflet_get_data_limit(buf);
 }
 
-errno_t
-kern_buflet_set_data_limit(const kern_buflet_t buf, const uint16_t dlim)
+errno_t kern_buflet_attach_buffer(const kern_buflet_t buflet, mach_vm_address_t baddr)
 {
-	return __buflet_set_data_limit(buf, dlim);
-}
+    errno_t err;
+    struct skmem_obj_info oib;
 
-packet_trace_id_t
-kern_packet_get_trace_id(const kern_packet_t ph)
-{
-	return __packet_get_trace_id(ph);
-}
-
-void
-kern_packet_set_trace_id(const kern_packet_t ph, packet_trace_id_t trace_id)
-{
-	return __packet_set_trace_id(ph, trace_id);
-}
-
-void
-kern_packet_trace_event(const kern_packet_t ph, uint32_t event)
-{
-	return __packet_trace_event(ph, event);
-}
-
-errno_t
-kern_packet_copy_bytes(kern_packet_t pkt, size_t off, size_t len, void* out_data)
-{
-	kern_buflet_t buflet = NULL;
-	size_t count;
-	uint8_t *addr;
-	uint32_t buflet_len;
-
-	buflet = __packet_get_next_buflet(pkt, buflet);
-	if (buflet == NULL) {
-		return EINVAL;
-	}
-	buflet_len = __buflet_get_data_length(buflet);
-	if (len > buflet_len) {
-		return EINVAL;
-	}
-	if (off > buflet_len) {
-		return EINVAL;
-	}
-	addr = __buflet_get_data_address(buflet);
-	if (addr == NULL) {
-		return EINVAL;
-	}
-	addr += __buflet_get_data_offset(buflet);
-	addr += off;
-	count = MIN(len, buflet_len - off);
-	bcopy((void *) addr, out_data, count);
-
-	return 0;
+    ASSERT(buflet != NULL && baddr != 0 && buflet->buf_qoff);
 }

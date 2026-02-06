@@ -34,7 +34,7 @@ void
 fsw_classq_setup(struct nx_flowswitch *fsw, struct nexus_adapter *hostna)
 {
 	FSW_WLOCK_ASSERT_HELD(fsw);
-	ASSERT(hostna->na_ifp->if_snd->ifcq_type != PKTSCHEDT_NONE);
+	ASSERT(hostna->na_ifp->if_snd.ifcq_type != PKTSCHEDT_NONE);
 	ASSERT(hostna->na_ifp->if_eflags & IFEF_TXSTART);
 	if (hostna->na_type == NA_NETIF_COMPAT_HOST) {
 		fsw->fsw_classq_enq_ptype = QP_MBUF;
@@ -51,7 +51,7 @@ fsw_classq_teardown(struct nx_flowswitch *fsw, struct nexus_adapter *hostna)
 #pragma unused(fsw)
 #endif
 	FSW_WLOCK_ASSERT_HELD(fsw);
-	ASSERT(hostna->na_ifp->if_snd->ifcq_type != PKTSCHEDT_NONE);
+	ASSERT(hostna->na_ifp->if_snd.ifcq_type != PKTSCHEDT_NONE);
 	ASSERT(hostna->na_ifp->if_eflags & IFEF_TXSTART);
 	if (hostna->na_type == NA_NETIF_COMPAT_HOST) {
 		ASSERT(fsw->fsw_classq_enq_ptype == QP_MBUF);
@@ -60,12 +60,14 @@ fsw_classq_teardown(struct nx_flowswitch *fsw, struct nexus_adapter *hostna)
 		ASSERT(fsw->fsw_classq_enq_ptype == QP_PACKET);
 	}
 	/* flush the interface queues */
-	if_qflush_snd(hostna->na_ifp, false);
+	if_qflush(hostna->na_ifp, false);
 }
 
 struct mbuf *
-fsw_classq_kpkt_to_mbuf(struct nx_flowswitch *fsw, struct __kern_packet *pkt)
+fsw_classq_kpkt_to_mbuf(struct nx_flowswitch *fsw,
+    struct fsw_ft_pkt *ft_pkt, proc_t proc)
 {
+    struct __kern_packet *pkt = ft_pkt->ft_pkt_ptr;
 	struct mbuf *m = NULL;
 	unsigned int one = 1;
 	int error;
@@ -90,16 +92,13 @@ fsw_classq_kpkt_to_mbuf(struct nx_flowswitch *fsw, struct __kern_packet *pkt)
 	    sizeof(pkt->pkt_flowsrc_token));
 	_CASSERT(sizeof(m->m_pkthdr.pkt_mpriv_fidx) ==
 	    sizeof(pkt->pkt_flowsrc_fidx));
-	_CASSERT(sizeof(m->m_pkthdr.comp_gencnt) ==
-	    sizeof(pkt->pkt_comp_gencnt));
 
 	m->m_pkthdr.pkt_flowid = pkt->pkt_flow_token;
-	m->m_pkthdr.comp_gencnt = pkt->pkt_comp_gencnt;
 	m->m_pkthdr.pkt_mpriv_srcid = pkt->pkt_flowsrc_token;
 	m->m_pkthdr.pkt_mpriv_fidx = pkt->pkt_flowsrc_fidx;
 
 	SK_DF(SK_VERB_TX | SK_VERB_DUMP, "%s(%d) %s",
-	    sk_proc_name_address(current_proc()), sk_proc_pid(current_proc()),
+	    sk_proc_name_address(proc), sk_proc_pid(proc),
 	    sk_dump("buf", m->m_data, m->m_pkthdr.len, 128, NULL, 0));
 
 	if (__improbable((error != 0))) {

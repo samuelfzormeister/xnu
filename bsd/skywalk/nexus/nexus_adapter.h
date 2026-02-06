@@ -89,7 +89,7 @@ typedef enum {
 #endif /* CONFIG_NEXUS_NETIF */
 #if CONFIG_NEXUS_FLOWSWITCH
 	NA_FLOWSWITCH_VP,       /* struct nexus_vp_adapter */
-	NA_FLOWSWITCH_VP_WRAP,  /* a forbidden 12th option??? */
+	NA_FLOWSWITCH_VP_WRAP,  /* struct nexus_wrap_adapter */
 #endif /* CONFIG_NEXUS_FLOWSWITCH */
 } nexus_adapter_type_t;
 

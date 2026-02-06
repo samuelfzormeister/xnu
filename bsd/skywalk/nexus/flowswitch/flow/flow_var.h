@@ -65,6 +65,7 @@
 #define _SKYWALK_NEXUS_FLOWSIWTCH_FLOW_FLOWVAR_H_
 
 #ifdef BSD_KERNEL_PRIVATE
+#include <skywalk/core/skywalk_common.h>
 #include <skywalk/core/skywalk_var.h>
 #include <skywalk/lib/cuckoo_hashtable.h>
 #include <skywalk/namespace/netns.h>
@@ -788,8 +789,8 @@ __attribute__((always_inline))
 static inline int
 flow_ip_cmp(const void *a0, const void *b0, size_t alen)
 {
-	struct flow_ip_addr *a = __DECONST(struct flow_ip_addr *, a0),
-	    *b = __DECONST(struct flow_ip_addr *, b0);
+	union __ip_addr *a = __DECONST(union __ip_addr *, a0),
+	    *b = __DECONST(union __ip_addr *, b0);
 
 	switch (alen) {
 	case sizeof(struct in_addr):
@@ -948,7 +949,7 @@ extern struct flow_entry * flow_mgr_find_conflicting_fe(struct flow_mgr *fm,
 extern void flow_mgr_foreach_flow(struct flow_mgr *fm,
     void (^flow_handler)(struct flow_entry *fe));
 extern struct flow_entry * flow_mgr_get_host_fe(struct flow_mgr *fm);
-extern struct flow_entry *flow_entry_find_by_uuid(struct flow_owner *,
+extern struct flow_entry *flow_entry_find_by_rule_id(struct flow_owner *,
     uuid_t);
 extern struct flow_entry * flow_entry_alloc(struct flow_owner *fo,
     struct nx_flow_req *req, int *perr);
@@ -959,7 +960,7 @@ extern void flow_entry_retain(struct flow_entry *fe);
 extern void flow_entry_release(struct flow_entry **pfe);
 extern uint32_t flow_entry_refcnt(struct flow_entry *fe);
 
-extern struct flow_entry_dead *flow_entry_dead_alloc(zalloc_flags_t);
+extern struct flow_entry_dead *flow_entry_dead_alloc(boolean_t can_block);
 extern void flow_entry_dead_free(struct flow_entry_dead *);
 
 extern void flow_entry_stats_get(struct flow_entry *, struct sk_stats_flow *);

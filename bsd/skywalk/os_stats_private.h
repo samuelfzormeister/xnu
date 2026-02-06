@@ -628,12 +628,6 @@
 	X(NETIF_STATS_TX_SYNC,			"TxSYNC",		"\t\t%llu sync\n")      \
 	X(NETIF_STATS_TX_REPL,			"TxRepl",		"\t\t%llu pool replenished\n")  \
 	X(NETIF_STATS_TX_DROP_ENQ_AQM,		"TxDropEnqueueAQM",     "\t\t%llu dropped due to AQM enqueue failure\n")        \
-	X(NETIF_STATS_GSO_SEG,			"GSOSegments",          "\t\t%llu GSO segments created\n") \
-	X(NETIF_STATS_GSO_PKT,			"GSOPackets",           "\t\t%llu GSO packets \n") \
-	X(NETIF_STATS_GSO_PKT_DROP_NOMEM,	"GSODropNoMem",         "\t\t%llu GSO packet dropped due to allocation failure\n") \
-	X(NETIF_STATS_GSO_PKT_DROP_NA_INACTIVE,	"GSODropNaInactive",    "\t\t%llu GSO packet dropped due to inactive netif\n") \
-	X(NETIF_STATS_GSO_PKT_DROP_BADLEN,	"GSODropBadLen",        "\t\t%llu GSO packet dropped due to bad packet length\n") \
-	X(NETIF_STATS_GSO_PKT_DROP_NONTCP,	"GSODropNonTcp",        "\t\t%llu GSO packet dropped as it is not a TCP packet\n") \
         \
 	X(NETIF_STATS_DROP,			"Drop",			"\t%llu dropped\n")     \
 	X(NETIF_STATS_DROP_NOMEM_BUF,		"DropNoMemBuf",		"\t\t%llu dropped due to packet alloc failure\n")       \
@@ -644,6 +638,7 @@
 	X(NETIF_STATS_DROP_KRDROP_MODE,		"DropKrDropMode",	"\t\t%llu dropped due to dst kring in drop mode\n")     \
 	X(NETIF_STATS_DROP_RXQ_OVFL,		"DropRxqOverflow",	"\t\t%llu dropped due to RX Queue overflow\n")     \
 	X(NETIF_STATS_DROP_NO_RX_CB,		"DropNoRxCallback",	"\t\t%llu dropped due to missing RX callback\n") \
+	X(NETIF_STATS_DROP_NO_WRAP_VP,		"DropNoWrapVP",	"\t\t%llu dropped due to no wrap vp being available\n") \
         \
 	/* Channel event stats */  \
 	X(NETIF_STATS_EV_SENT,			"EvSent",		"\t%llu channel event delivered\n")     \
@@ -720,6 +715,7 @@
 	X(NETIF_STATS_VP_FLOW_NOT_FOUND,	"VPFlowNotFound",	"\t%llu packets found no matching flow\n") \
 	X(NETIF_STATS_VP_FLOW_DISABLED,		"VPFlowDisabled",	"\t%llu lookup failures due to disabled flow\n") \
 	X(NETIF_STATS_VP_FLOW_EMPTY_TABLE,	"VPFlowEmptyTable",	"\t%llu lookup failures due to empty flow table\n") \
+	X(NETIF_STATS_VP_FLOW_ADD_ALLOC_FAIL,	"VPFlowAddAllocFail",	"\t%llu failed attempts to initialize flow table\n") \
 	X(NETIF_STATS_VP_FLOW_TABLE_INIT_FAIL,	"VPFlowTableInitFail",	"\t%llu failed attempts to initialize flow table\n") \
 	X(NETIF_STATS_VP_FLOW_INSERT_FAIL,	"VPFlowInsertFail",	"\t%llu failed attempts to insert flow\n") \
 	X(NETIF_STATS_VP_FLOW_ADD,		"VPFlowAdd",		"\t%llu flows added\n") \
@@ -728,27 +724,6 @@
 	/* Netif agent stats */ \
 	X(NETIF_STATS_AGENT_BAD_ETHERTYPE,	"AgentBadEthertype",	"\t%llu flow add failures due to invalid ethertype\n") \
 	X(NETIF_STATS_AGENT_BAD_IPV6_ADDR,	"AgentBadIPv6Addr",	"\t%llu flow add failures due to invalid IPv6 address\n") \
-	X(NETIF_STATS_AGENT_DUP_FLOW,		"AgentDupFlow",		"\t%llu duplicate flows added\n") \
-        \
-	/* Netif llink stats */ \
-	X(NETIF_STATS_LLINK_ADD,		"LLinkAdd",		"\t%llu logical links added\n") \
-	X(NETIF_STATS_LLINK_REMOVE,		"LLinkRemove",		"\t%llu logical links removed\n") \
-	X(NETIF_STATS_LLINK_DEF_QSET_USED,	"LLinkDefQSetUsed",	"\t%llu uses of the default qset\n") \
-	X(NETIF_STATS_LLINK_NONDEF_QSET_USED,	"LLinkNonDefQSetUsed",	"\t%llu uses of a non-default qset\n") \
-	X(NETIF_STATS_LLINK_HINT_NOT_USEFUL,	"LLinkHintNotUseful",	"\t%llu hints specified but qset not found\n") \
-	X(NETIF_STATS_LLINK_DUP_INT_ID_GENERATED, "LLinkDupIntIDGenerated", "\t%llu duplicate internal llink IDs generated\n") \
-	X(NETIF_STATS_LLINK_DUP_ID_GIVEN,	"LLinkDupIDGiven",	"\t%llu duplicate llink IDs given by the provider\n") \
-	X(NETIF_STATS_LLINK_QSET_INIT_FAIL,	"LLinkQSetInitFail",	"\t%llu queue set initialization failures\n") \
-	X(NETIF_STATS_LLINK_RXQ_INIT_FAIL,	"LLinkRXQInitFail",	"\t%llu RX queue initialization failures\n") \
-	X(NETIF_STATS_LLINK_TXQ_INIT_FAIL,	"LLinkTXQInitFail",	"\t%llu TX queue initialization failures\n") \
-	X(NETIF_STATS_LLINK_NOT_FOUND_REMOVE,	"LLinkNotFoundRemove",	"\t%llu not found during remove\n") \
-	X(NETIF_STATS_LLINK_TX_DROP_BAD_STATE,	"LLinkTxDroppedBadState", "\t%llu TX packets dropped due to bad llink state\n") \
-	X(NETIF_STATS_LLINK_RX_DROP_BAD_STATE,	"LLinkRxDroppedBadState", "\t%llu RX packets dropped due to bad llink state\n") \
-	X(NETIF_STATS_LLINK_AQM_QFULL,		"LLinkAQMQFull",	"\t%llu occurances of the queue full condition\n") \
-	X(NETIF_STATS_LLINK_AQM_DROPPED,	"LLinkAQMDropped",	"\t%llu packets dropped due to AQM\n") \
-	X(NETIF_STATS_LLINK_AQM_DEQ_BAD_STATE,	"LLinkAQMDeqBadState",	"\t%llu dequeues occurred while llink is in a bad state\n") \
-	X(NETIF_STATS_LLINK_QSET_BAD_STATE,	"LLinkQSetAccessBadState", "\t%llu attempts to access a queue set while in bad llink state\n") \
-	X(NETIF_STATS_LLINK_ADD_BAD_PARAMS,	"LLinkAddBadParams",	"\t%llu attempts to add an llink with bad parameters\n") \
         \
 	X(__NETIF_STATS_MAX,			"",			"end of netif stats")
 
@@ -1219,12 +1194,8 @@ typedef enum {
 struct sk_stats_flow_track {
 	uint64_t        sft_bytes;      /* bytes */
 	uint64_t        sft_packets;    /* packets */
-	uint64_t        sft_spackets;   /* super packets */
 	sk_stats_flow_track_state_t sft_state;  /* SFT_STATE_* */
 	uint32_t        sft_rtt;        /* avg ack rtt at flowswith */
-	uint32_t        sft_seq;        /* max sequence number sent */
-	uint16_t        sft_max_win;    /* largest window (pre scaling) */
-	uint8_t         sft_wscale;     /* window scaling factor */
 };
 
 #define FLOW_STATS_IN_ADD(fe, stat, cnt) { \
@@ -1247,21 +1218,20 @@ struct sk_stats_flow_track {
 struct sk_stats_flow {
 	uuid_t          sf_nx_uuid;             /* nexus instance uuid */
 	char            sf_if_name[IFNAMSIZ];   /* interface name */
-	uint32_t        sf_if_index;            /* interface index */
 	uint32_t        sf_bucket_idx;          /* flow bucket index */
 
-	pid_t           sf_pid;                 /* flow pid */
-	pid_t           sf_epid;                /* flow effective pid */
-	char            sf_proc_name[32];       /* flow proc name */
-	char            sf_eproc_name[32];      /* flow effecitve proc name */
+	char            sf_owner_name[32];       /* flow proc name */
+	pid_t           sf_owner_pid;
 
 	uint32_t        sf_flags;               /* SFLOWF_* */
 	nexus_port_t    sf_nx_port;             /* nexus port */
 
+	union sockaddr_in_4_6 sf_laddr;
+	union sockaddr_in_4_6 sf_faddr;
+
 	uint8_t         sf_protocol;            /* effective protocol */
 	packet_svc_class_t sf_svc_class;        /* service class */
 	flowadv_idx_t   sf_adv_idx;             /* flow advistory table index */
-	struct flow_key sf_key __attribute__((__aligned__(16)));
 
 	volatile struct sk_stats_flow_track sf_ltrack; /* local states */
 	volatile struct sk_stats_flow_track sf_rtrack; /* remote states */
@@ -1533,6 +1503,8 @@ typedef enum {
 	SREG_RING,              /* rings */
 	SREG_BUF,               /* rx/tx buffers */
 	SREG_MDU,               /* userland metadata */
+	SREG_TXAUSD,                /* tx/alloc user slot descriptors */
+	SREG_RXFUSD,                /* rx/free user slot descriptors */
 	SREG_USTATS,            /* statistics */
 	SREG_FLOWADV,           /* flow advisories */
 	SREG_NEXUSADV,          /* nexus advisories */
@@ -1565,13 +1537,11 @@ struct sk_stats_region {
 	uint64_t        sreg_r_seg_size;        /* requested seg size */
 	uint64_t        sreg_c_seg_size;        /* configured seg size */
 	uint64_t        sreg_seg_cnt;           /* number of segments */
-	uint64_t        sreg_seg_objs;          /* # of objects per segment */
 	uint64_t        sreg_r_obj_size;        /* requested obj size */
 	uint64_t        sreg_r_obj_cnt;         /* requested obj count */
 	uint64_t        sreg_c_obj_size;        /* configured obj size */
 	uint64_t        sreg_c_obj_cnt;         /* configured obj count */
-	uint64_t        sreg_align;             /* object alignment */
-	uint64_t        sreg_max_frags;         /* max number of buflets */
+	uint64_t        sreg_seg_objs;          /* # of objects per segment */
 
 	/*
 	 * Region statistics.
@@ -1581,35 +1551,26 @@ struct sk_stats_region {
 	uint64_t        sreg_memtotal;          /* total memory in region */
 	uint64_t        sreg_seginuse;          /* total unfreed segments */
 	uint64_t        sreg_rescale;           /* # of hash table rescales */
-	uint64_t        sreg_hash_size;         /* size of hash table */
 	uint64_t        sreg_alloc;             /* number of allocations */
 	uint64_t        sreg_free;              /* number of frees */
 };
 
 /* valid values for sreg_mode */
-#define SREG_MODE_NOREDIRECT    0x1     /* unaffected by defunct */
-#define SREG_MODE_MMAPOK        0x2     /* can be mapped to user task */
-#define SREG_MODE_KREADONLY     0x4     /* kernel read-only */
-#define SREG_MODE_UREADONLY     0x8     /* if user map, map it read-only */
-#define SREG_MODE_PERSISTENT    0x10    /* memory stays non-volatile */
-#define SREG_MODE_MONOLITHIC    0x20    /* monolithic region */
-#define SREG_MODE_NOMAGAZINES   0x40    /* disable magazines layer */
-#define SREG_MODE_NOCACHE       0x80    /* caching-inhibited */
-#define SREG_MODE_SEGPHYSCONTIG 0x100   /* phys. contiguous segment */
-#define SREG_MODE_SHAREOK       0x200   /* allow object sharing */
-#define SREG_MODE_IODIR_IN      0x400   /* I/O direction In */
-#define SREG_MODE_IODIR_OUT     0x800   /* I/O direction Out */
-#define SREG_MODE_GUARD         0x1000  /* guard pages region */
-#define SREG_MODE_PUREDATA      0x2000  /* purely data; no pointers */
-#define SREG_MODE_PSEUDO        0x4000  /* external backing store */
-#define SREG_MODE_SLAB          (1U << 30) /* backend for slab layer */
-#define SREG_MODE_MIRRORED      (1U << 31) /* controlled by another region */
+#define SREG_MODE_NOREDIRECT     0x1     /* unaffect by defunct */
+#define SREG_MODE_MMAPOK         0x2     /* can be mapped to user task */
+#define SREG_MODE_READONLY       0x4     /* read only */
+#define SREG_MODE_PERSISTENT     0x8     /* memory stays non-volatile */
+#define SREG_MODE_MONOLITHIC     0x10    /* monolithic region */
+#define SREG_MODE_NOMAGAZINES    0x20    /* disable magazines layer */
+#define SREG_MODE_NOCACHE        0x40    /* caching-inhibited */
+#define SREG_MODE_SEGPHYSCONTIG  0x80    /* phys. contiguous segment */
+#define SREG_MODE_SLAB           (1U << 30) /* backend for slab layer */
+#define SREG_MODE_MIRRORED       (1U << 31) /* controlled by another region */
 
-#define SREG_MODE_BITS                                                  \
-	"\020\01NOREDIRECT\02MMAPOK\03KREADONLY\04UREADONLY"            \
-	"\05PERSISTENT\06MONOLITHIC\07NOMAGAZINES\10NOCACHE"            \
-	"\11SEGPHYSCONTIG\012SHAREOK\013IODIR_IN\014IODIR_OUT"          \
-	"\015GUARD\016PUREDATA\017PSEUDO\037SLAB\040MIRRORED"
+#define SREG_MODE_BITS           \
+	"\020\01NOREDIRECT\02MMAPOK\03READONLY\04PERSISTENT"    \
+	"\05MONOLITHIC\06NOMAGAZINES\10NOCACHE\11SEGPHYSCONTIG"    \
+	"\037SLAB\040MIRRORED"
 
 typedef enum {
 	SAR_TYPE_NEXUS,
@@ -1676,12 +1637,9 @@ struct sk_stats_cache {
 #define SCA_MODE_NOREDIRECT     0x00000004      /* unaffected by defunct */
 #define SCA_MODE_BATCH          0x00000008      /* supports batch alloc/free */
 #define SCA_MODE_DYNAMIC        0x00000010      /* enable magazine resizing */
-#define SCA_MODE_CLEARONFREE    0x00000020      /* zero-out upon slab free */
-#define SCA_MODE_PSEUDO         0x00000040      /* external backing store */
 
 #define SCA_MODE_BITS \
-	"\020\01NOMAGAZINES\02AUDIT\03NOREDIRECT\04BATCH\05DYNAMIC"     \
-	"\06CLEARONFREE\07PSEUDO"
+	"\020\01NOMAGAZINES\02AUDIT\03NOREDIRECT\04BATCH\05DYNAMIC"
 
 #endif /* PRIVATE || BSD_KERNEL_PRIVATE */
 #endif /* !_SKYWALK_OS_STATS_H_ */

@@ -26,8 +26,6 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
-#include "skywalk/mem/skmem_region_var.h"
-#include "sys/mcache.h"
 #include <skywalk/os_skywalk_private.h>
 #include <sys/queue.h>
 #define _FN_KPRINTF

@@ -29,6 +29,7 @@
 #ifndef _SKYWALK_NEXUS_NETIF_H_
 #define _SKYWALK_NEXUS_NETIF_H_
 
+#include <net/network_agent.h>
 #include <skywalk/os_skywalk_private.h>
 #include <skywalk/nexus/nexus_pktq.h>
 
@@ -178,31 +179,6 @@ struct netif_qset {
 
 #define NETIF_DEFAULT_QSET(_qs)    ((_qs)->nqs_flags & NETIF_QSET_FLAG_DEFAULT)
 
-struct netif_llink {
-	struct nx_netif             *nll_nif; /* backpointer to parent netif instance */
-	STAILQ_ENTRY(netif_llink)   nll_link;
-	SLIST_HEAD(, netif_qset)    nll_qset_list;
-	struct netif_qset           *nll_default_qset;
-	struct os_refcnt            nll_refcnt;
-#define NETIF_LLINK_ID_DEFAULT    0
-	kern_nexus_netif_llink_id_t nll_link_id;
-	uint16_t                    nll_link_id_internal;
-	uint16_t                    nll_qset_cnt;
-	uint8_t                     nll_state;
-	uint8_t                     nll_flags;
-	void                        *nll_ctx; /* context provided by driver */
-};
-STAILQ_HEAD(netif_llink_head, netif_llink);
-
-/* values for nll_flags */
-#define NETIF_LLINK_FLAG_DEFAULT    0x1 /* default logical link */
-
-/* values for nll_state */
-#define NETIF_LLINK_STATE_INIT         0x1 /* Intialized and ready for use */
-#define NETIF_LLINK_STATE_DESTROYED    0x2 /* not available for use */
-
-#define NETIF_DEFAULT_LLINK(_ll)  ((_ll)->nll_flags & NETIF_LLINK_FLAG_DEFAULT)
-
 SLIST_HEAD(netif_agent_flow_head, netif_agent_flow);
 struct netif_agent_flow {
 	SLIST_ENTRY(netif_agent_flow) naf_link;
@@ -225,13 +201,10 @@ struct netif_agent_flow {
  */
 #define NETIF_FLAG_LOW_LATENCY          0x00000001
 #define NETIF_FLAG_COMPAT               0x00000002
-#define NETIF_FLAG_LLINK_INITIALIZED    0x00000004
 #define NETIF_IS_LOW_LATENCY(n) \
     (((n)->nif_flags & NETIF_FLAG_LOW_LATENCY) != 0)
 #define NETIF_IS_COMPAT(n) \
     (((n)->nif_flags & NETIF_FLAG_COMPAT) != 0)
-#define NETIF_LLINK_ENABLED(n) \
-    (((n)->nif_flags & NETIF_FLAG_LLINK_INITIALIZED) != 0)
 #define NETIF_DEFAULT_DROP_ENABLED(n) \
     (nx_netif_filter_default_drop != 0 && \
     (((n)->nif_filter_flags & NETIF_FILTER_FLAG_INITIALIZED) != 0))
@@ -247,9 +220,6 @@ struct netif_agent_flow {
 /* nif_flow_flags */
 #define NETIF_FLOW_FLAG_INITIALIZED     0x00000001
 #define NETIF_FLOW_FLAG_ENABLED         0x00000002
-
-/* nif_llink_flags */
-#define NETIF_LLINK_FLAG_INITIALIZED    0x00000001
 
 /* Used by netif_hwna_set_mode() */
 typedef enum {
@@ -315,17 +285,6 @@ struct nx_netif {
 	struct netif_flowtable  *nif_flow_table;
 	struct kern_channel     *nif_hw_ch;
 	uint32_t                nif_hw_ch_refcnt;
-
-	/* logical link */
-	decl_lck_rw_data(, nif_llink_lock);
-	struct kern_nexus_netif_llink_init *nif_default_llink_params;
-	struct netif_llink         *nif_default_llink;
-	STAILQ_HEAD(, netif_llink) nif_llink_list;
-	uint16_t                   nif_llink_cnt;
-
-	/* capability configuration callback function and context */
-	kern_nexus_capab_interface_advisory_config_fn_t nif_intf_adv_config;
-	void *nif_intf_adv_prov_ctx;
 
 #if (DEVELOPMENT || DEBUG)
 	struct skoid            nif_skoid;
@@ -416,6 +375,7 @@ struct nx_netif_mit {
 	/*
 	 * Adaptive mitigation.
 	 */
+	uint32_t        mit_ad_enable;
 	uint32_t        mit_cfg_idx_max;        /* highest config selector */
 	uint32_t        mit_cfg_idx;            /* current config selector */
 	const struct mit_cfg_tbl *mit_cfg;      /* current config mapping */
@@ -466,14 +426,13 @@ struct nx_netif_mit {
 extern kern_allocation_name_t skmem_tag_netif_filter;
 extern kern_allocation_name_t skmem_tag_netif_flow;
 extern kern_allocation_name_t skmem_tag_netif_agent_flow;
-extern kern_allocation_name_t skmem_tag_netif_llink;
 extern kern_allocation_name_t skmem_tag_netif_qset;
 
 __BEGIN_DECLS
 extern struct nxdom nx_netif_dom_s;
 extern struct kern_nexus_domain_provider nx_netif_prov_s;
 
-extern struct nx_netif *nx_netif_alloc(zalloc_flags_t);
+extern struct nx_netif *nx_netif_alloc(boolean_t can_block);
 extern void nx_netif_free(struct nx_netif *);
 extern void nx_netif_retain(struct nx_netif *);
 extern void nx_netif_release(struct nx_netif *);
@@ -515,7 +474,7 @@ extern void nx_netif_reap(struct nexus_netif_adapter *, struct ifnet *,
 
 extern void nx_netif_copy_stats(struct nexus_netif_adapter *,
     struct if_netif_stats *);
-extern struct nexus_netif_adapter * na_netif_alloc(zalloc_flags_t);
+extern struct nexus_netif_adapter * na_netif_alloc(boolean_t can_block);
 extern void na_netif_free(struct nexus_adapter *);
 extern void na_netif_finalize(struct nexus_netif_adapter *, struct ifnet *);
 extern int nx_netif_interface_advisory_report(struct nexus_adapter *,
@@ -727,33 +686,6 @@ extern void netif_rxpoll_compat_thread_func(void *, wait_result_t);
 extern int netif_gso_dispatch(struct ifnet *ifp, struct mbuf *m);
 extern void netif_gso_init(void);
 extern void netif_gso_fini(void);
-
-/*
- * Logical link functions
- */
-extern void nx_netif_llink_module_init(void);
-extern void nx_netif_llink_module_fini(void);
-extern void nx_netif_llink_retain(struct netif_llink *);
-extern void nx_netif_llink_release(struct netif_llink **);
-extern void nx_netif_qset_retain(struct netif_qset *);
-extern void nx_netif_qset_release(struct netif_qset **);
-extern void nx_netif_llink_init(struct nx_netif *);
-extern void nx_netif_llink_fini(struct nx_netif *);
-extern struct netif_qset * nx_netif_find_qset(struct nx_netif *, uint64_t);
-extern struct netif_qset * nx_netif_get_default_qset_noref(struct nx_netif *);
-extern int netif_qset_enqueue(struct netif_qset *, struct __kern_packet *,
-    struct __kern_packet *, uint32_t, uint32_t, uint32_t *, uint32_t *);
-extern int nx_netif_default_llink_config(struct nx_netif *,
-    struct kern_nexus_netif_llink_init *);
-extern void nx_netif_llink_config_free(struct nx_netif *);
-extern int nx_netif_llink_ext_init_default_queues(struct kern_nexus *);
-extern void nx_netif_llink_ext_fini_default_queues(struct kern_nexus *);
-extern int nx_netif_validate_llink_config(struct kern_nexus_netif_llink_init *,
-    bool);
-extern int nx_netif_llink_add(struct nx_netif *,
-    struct kern_nexus_netif_llink_init *, struct netif_llink **);
-extern int nx_netif_llink_remove(struct nx_netif *,
-    kern_nexus_netif_llink_id_t);
 
 __END_DECLS
 #endif /* CONFIG_NEXUS_NETIF */

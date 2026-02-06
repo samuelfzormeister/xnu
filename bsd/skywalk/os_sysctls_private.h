@@ -31,6 +31,7 @@
 
 #if defined(PRIVATE) || defined(BSD_KERNEL_PRIVATE)
 #include <stdint.h>
+#include <sys/types.h>
 
 /*
  * X (type, field, default_value)

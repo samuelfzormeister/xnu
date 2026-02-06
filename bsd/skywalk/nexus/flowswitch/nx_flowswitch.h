@@ -58,6 +58,7 @@
 #include <skywalk/os_skywalk_private.h>
 #include <net/ethernet.h>
 #include <net/if_vlan_var.h>
+#include <net/network_agent.h>
 #include <netinet/ip6.h>
 
 #include <skywalk/nexus/flowswitch/flow/flow_var.h>
@@ -226,9 +227,9 @@ struct nx_flowswitch {
 #define fsw_ether_shost          __fsw_slladdr._eth_src
 
 	int (*fsw_resolve)(struct nx_flowswitch *, struct flow_route *,
-	    struct __kern_packet *);
+	    struct fsw_ft_pkt *, proc_t);
 	void (*fsw_frame)(struct nx_flowswitch *, struct flow_route *,
-	    struct __kern_packet *);
+	    struct fsw_ft_pkt *);
 	sa_family_t (*fsw_demux)(struct nx_flowswitch *,
 	    struct __kern_packet *);
 	errno_t (*fsw_deq_packets)(struct nx_flowswitch *,
@@ -269,8 +270,7 @@ struct nx_flowswitch {
 	/* input network emulator */
 	struct netem            *fsw_input_netem;
 
-	struct kern_channel     *fsw_dev_ch;
-	struct kern_channel     *fsw_host_ch;
+	STAILQ_HEAD(, nexus_wrap_adapter) fsw_wrap_head;
 
 	/*
 	 * The reaper thread gets scheduled on-demand, whenever there
@@ -283,7 +283,6 @@ struct nx_flowswitch {
 	struct thread           *fsw_reap_thread;
 	char                    fsw_reap_name[MAXTHREADNAMESIZE];
 
-	uint64_t                fsw_reap_last;
 	uint64_t                fsw_drain_channel_chk_last;
 	uint64_t                fsw_drain_netif_chk_last;
 

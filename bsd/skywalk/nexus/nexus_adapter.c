@@ -1431,8 +1431,7 @@ na_kr_create(struct nexus_adapter *na, uint32_t tailroom, boolean_t alloc_ctx)
 	len = ((n[NR_TX] + n[NR_RX] + n[NR_A] + n[NR_F] + n[NR_EV]) *
 	    sizeof(struct __kern_channel_ring)) + tailroom;
 
-	na->na_rings_mem_sz = (size_t)len;
-	na->na_tx_rings = sk_alloc((size_t)len, Z_WAITOK, skmem_tag_nx_rings);
+	na->na_tx_rings = sk_alloc((size_t)len, M_WAITOK, skmem_tag_nx_rings);
 	if (__improbable(na->na_tx_rings == NULL)) {
 		SK_ERR("Cannot allocate krings");
 		err = ENOMEM;
@@ -1463,13 +1462,12 @@ na_kr_create(struct nexus_adapter *na, uint32_t tailroom, boolean_t alloc_ctx)
 		tot_slots += n[NR_F] * na_get_nslots(na, NR_F);
 		c = tot_slots;
 	}
-	na->na_total_slots = tot_slots;
 
 	/* slot context (optional) for all TX/RX ring slots of this adapter */
 	if (alloc_ctx) {
 		na->na_slot_ctxs =
 		    skn_alloc_type_array(slot_ctxs, struct slot_ctx,
-		    na->na_total_slots, Z_WAITOK, skmem_tag_nx_contexts);
+		    tot_slots, M_WAITOK, skmem_tag_nx_contexts);
 		if (na->na_slot_ctxs == NULL) {
 			SK_ERR("Cannot allocate slot contexts");
 			err = ENOMEM;
@@ -1483,7 +1481,7 @@ na_kr_create(struct nexus_adapter *na, uint32_t tailroom, boolean_t alloc_ctx)
 	 * adapter.
 	 */
 	na->na_scratch = skn_alloc_type_array(scratch, kern_packet_t,
-	    na->na_total_slots, Z_WAITOK, skmem_tag_nx_scratch);
+	    tot_slots, M_WAITOK, skmem_tag_nx_scratch);
 	if (na->na_scratch == NULL) {
 		SK_ERR("Cannot allocate slot contexts");
 		err = ENOMEM;
@@ -1532,28 +1530,14 @@ na_kr_create(struct nexus_adapter *na, uint32_t tailroom, boolean_t alloc_ctx)
 			}
 			switch (t) {
 			case NR_A:
-				if (i == 0) {
-					kring->ckr_na_sync =
-					    na_packet_pool_alloc_sync;
-					kring->ckr_alloc_ws =
-					    na_upp_alloc_lowat;
-				} else {
-					ASSERT(i == 1);
-					kring->ckr_na_sync =
-					    na_packet_pool_alloc_buf_sync;
-					kring->ckr_alloc_ws =
-					    na_upp_alloc_buf_lowat;
-				}
+				kring->ckr_na_sync =
+					   na_packet_pool_alloc_sync;
+				kring->ckr_alloc_ws =
+					   na_upp_alloc_lowat;
 				break;
 			case NR_F:
-				if (i == 0) {
-					kring->ckr_na_sync =
-					    na_packet_pool_free_sync;
-				} else {
-					ASSERT(i == 1);
-					kring->ckr_na_sync =
-					    na_packet_pool_free_buf_sync;
-				}
+				kring->ckr_na_sync =
+					   na_packet_pool_free_sync;
 				break;
 			case NR_TX:
 				kring->ckr_na_sync = na->na_txsync;
