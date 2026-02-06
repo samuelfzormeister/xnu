@@ -69,6 +69,8 @@
 /* OSRELEASE, osrelease, is a string as returned by uname -r */
 #define OSRELEASE	"###KERNEL_VERSION_LONG###"
 
+#define OSBRANCH    "###KERNEL_BRANCH###"
+
 #ifndef ASSEMBLER
 
 #if defined(__cplusplus)
@@ -104,6 +106,9 @@ extern const char osrelease[];
 
 /* osbuilder is a string as returned by uname -r */
 extern const char osbuilder[];
+
+/* osbranch is the 'lab' that the kernel is associated with */
+extern const char osbranch[];
 
 /* version is a string of the following form, as returned by uname -v:
  * "Darwin Kernel Version <osrelease>: <build date>; <osbuilder>:<build root>"

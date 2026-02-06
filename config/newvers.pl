@@ -49,6 +49,8 @@ die("OBJROOT not defined") unless defined($ENV{'OBJROOT'});
 
 my $versfile = "MasterVersion";
 $versfile = "$ENV{'SRCROOT'}/config/$versfile" if ($ENV{'SRCROOT'});
+my $branchfile = "KernelBranch";
+$branchfile = "$ENV{'SRCROOT'}/config/$branchfile" if ($ENV{'SRCROOT'});
 my $BUILD_SRCROOT=$ENV{'SRCROOT'};
 $BUILD_SRCROOT =~ s,/+$,,;
 my $BUILD_OBJROOT=$ENV{'OBJROOT'};
@@ -145,6 +147,11 @@ my $VERSION_PRERELEASE_LEVEL = $3;
 $VERSION_REVISION ="0" unless ($VERSION_REVISION);
 $stage = "r" if (!$stage || ($stage eq "fc"));
 $VERSION_PRERELEASE_LEVEL = "0" unless ($VERSION_PRERELEASE_LEVEL);
+my $branch = &ReadFile($branchfile);
+#$branch =~ s/\s//g;
+($branch) = split "\n", $branch;
+my $BRANCH;
+$BRANCH = "$branch";
 
 my $VERSION_STAGE;
 $VERSION_STAGE = 'VERSION_STAGE_DEV'     if ($stage eq 'd');
@@ -173,6 +180,7 @@ foreach $file (@ARGV) {
   $count += $data =~ s/###KERNEL_BUILDER###/$BUILDER/g;
   $count += $data =~ s/###KERNEL_BUILD_OBJROOT###/$BUILD_OBJROOT/g;
   $count += $data =~ s/###KERNEL_BUILD_DATE###/$BUILD_DATE/g;
+  $count += $data =~ s/###KERNEL_BRANCH###/$BRANCH/g;
   print " $count replacements\n";
   &WriteFile($file, $data);
 }
