@@ -887,7 +887,7 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
 void
 panic_spin_forever(void)
 {
-	paniclog_append_noflush("\nPlease go to https://panic.apple.com to report this panic\n");
+	paniclog_append_noflush("\nPlease go to https://github.com/samuelfzormeister/xnu to report this panic\n");
 
 	for (;;) {
 	}
