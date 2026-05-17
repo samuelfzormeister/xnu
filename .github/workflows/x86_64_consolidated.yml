@@ -12,6 +12,7 @@ on:
       - 6153/dev
       - 6153/arm-dev
       - 6153/x86-dev
+      - 6153/ak_unstable
 
 jobs:
     build:
