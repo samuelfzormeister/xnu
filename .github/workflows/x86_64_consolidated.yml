@@ -46,8 +46,8 @@ jobs:
             xcodebuild install CODE_SIGNING_ALLOWED=NO DSTROOT=$(xcrun --sdk macosx -show-sdk-platform-path) INSTALL_PATH="/usr/local/bin" -target ctfconvert -target ctfdump -target ctfmerge -sdk macosx
         - name: Install XNU headers
           run: |
-            export RC_ProjectName="xnu_headers_host"
-            export RC_ProjectNameAndSourceVersion="xnu_headers_host-$(cat ~/xnu/sourceversion)"
+            export RC_ProjectName="xnu_headers"
+            export RC_ProjectNameAndSourceVersion="xnu_headers-$(cat ~/xnu/sourceversion)"
             export RC_ProjectSourceVersion="$(cat ~/xnu/sourceversion)"
             export RC_ProjectBuildVersion="$(cat ~/xnu/buildversion)"
             export RC_XBS="YES"
