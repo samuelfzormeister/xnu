@@ -261,7 +261,7 @@ kxld_copyright_rights_tokens[] = {
 	kRightsTokenZormeister,
 };
 
-static uint32_t
+static int
 kxld_copyright_rights_token_count = sizeof(kxld_copyright_rights_tokens) / sizeof(const char *);
 
 /******************************************************************************
