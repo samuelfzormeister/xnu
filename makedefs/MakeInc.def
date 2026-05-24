@@ -577,11 +577,11 @@ LDFLAGS_KERNEL_RELEASEX86_64 += \
 	-Wl,-sectalign,__HIB,__sancov_pcs,0x1000
 endif
 
-ifneq ($(SYSCTL_KERN_OSRELEASE),19.6.0)
-LDFLAGS_KERNEL_RELEASEX86_64 += \
-    -Wl,-add_split_seg_info \
-    -Wl,-kernel
-endif
+# ifneq ($(SYSCTL_KERN_OSRELEASE),19.6.0)
+# LDFLAGS_KERNEL_RELEASEX86_64 += \
+#     -Wl,-add_split_seg_info \
+#     -Wl,-kernel
+# endif
 
 # Define KERNEL_BASE_OFFSET so known at compile time:
 CFLAGS_X86_64 += -DKERNEL_BASE_OFFSET=$(KERNEL_BASE_OFFSET)
@@ -676,11 +676,11 @@ LDFLAGS_KERNEL_GENARM64 = \
 	-Wl,-sectcreate,"__PLK_LLVM_COV",__llvm_covmap,/dev/null \
 	-Wl,-sectcreate,"__PLK_LINKEDIT",__data,/dev/null
 
-ifneq ($(SYSCTL_KERN_OSRELEASE),19.6.0)
-LDFLAGS_KERNEL_GENARM64 += \
-    -Wl,-add_split_seg_info \
-    -Wl,-kernel
-endif
+# ifneq ($(SYSCTL_KERN_OSRELEASE),19.6.0)
+# LDFLAGS_KERNEL_GENARM64 += \
+#     -Wl,-add_split_seg_info \
+#     -Wl,-kernel
+# endif
 
 LDFLAGS_KERNEL_SEGARM64 ?= \
 	-Wl,-segment_order,__TEXT:__DATA_CONST:__LINKEDIT:__TEXT_EXEC:__LAST:__KLD:__DATA:__BOOTDATA
