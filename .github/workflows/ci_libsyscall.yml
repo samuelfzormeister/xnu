@@ -66,7 +66,7 @@ jobs:
             export RC_ProjectBuildVersion="$(cat ~/xnu/buildversion)"
             export RC_XBS="YES"
             cd ~/xnu/
-            xcodebuild -project libsyscall/Libsyscall.xcproject VALID_ARCHS="x86_64 arm64" DSTROOT="$PWD/LIBSYSCALLROOT" install -arch x86_64 -arch arm64
+            xcodebuild -project libsyscall/Libsyscall.xcodeproj VALID_ARCHS="x86_64 arm64" DSTROOT="$PWD/LIBSYSCALLROOT" install -arch x86_64 -arch arm64
         - name: Package LIBSYSCALLROOT into a tarball
           run: |
             export RC_ProjectName="xnu"
